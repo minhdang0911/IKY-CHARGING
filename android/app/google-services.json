@@ -1,0 +1,91 @@
+{
+  "project_info": {
+    "project_number": "553517200895",
+    "firebase_url": "https://iky-gps.firebaseio.com",
+    "project_id": "iky-gps",
+    "storage_bucket": "iky-gps.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:553517200895:android:6ab9d22ec4aeec49cc63ca",
+        "android_client_info": {
+          "package_name": "com.visacoop"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "553517200895-3el0m6p0uhoprvs5f27cisp7spqam34h.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAvapCSiDXinILtgliheobqQW23RY-pVUw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "553517200895-3el0m6p0uhoprvs5f27cisp7spqam34h.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "553517200895-a5n52o40tek510v26jjtem4qbqoim3j5.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.haidv.PushNotifications"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:553517200895:android:3eac1ac7d4a54ae6cc63ca",
+        "android_client_info": {
+          "package_name": "hdv.iky.gpsv2"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "553517200895-ug47i7p1jg6dt83pof1l1hl5vraltooh.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "hdv.iky.gpsv2",
+            "certificate_hash": "48d993f97fb9e8eadf28931db299fbc8f4485ff5"
+          }
+        },
+        {
+          "client_id": "553517200895-3el0m6p0uhoprvs5f27cisp7spqam34h.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAvapCSiDXinILtgliheobqQW23RY-pVUw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "553517200895-3el0m6p0uhoprvs5f27cisp7spqam34h.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "553517200895-a5n52o40tek510v26jjtem4qbqoim3j5.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.haidv.PushNotifications"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

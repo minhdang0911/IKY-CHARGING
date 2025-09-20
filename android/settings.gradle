@@ -1,0 +1,25 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        google()
+        mavenCentral()
+        
+    }
+}
+
+rootProject.name = "visacoop"
+include(":app")
+
+// React Native Gradle Plugin
+includeBuild("../node_modules/@react-native/gradle-plugin")
+
+// ✅ QUAN TRỌNG: Autolinking cho native modules
+apply from: file("../node_modules/@react-native-community/cli-platform-android/native_modules.gradle"); applyNativeModulesSettingsGradle(settings)
