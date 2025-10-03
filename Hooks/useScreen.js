@@ -25,7 +25,7 @@ const useScreen = (initialScreen = 'Login') => {
   // Hàm login
   const login = (userData = null) => {
     setIsLoggedIn(true);
-    setCurrentScreen('Information'); // Mặc định về tab Information sau khi login
+    setCurrentScreen('Monitoring'); // Mặc định về tab Information sau khi login
     setScreenData(userData);
   };
 
@@ -96,6 +96,10 @@ const useScreen = (initialScreen = 'Login') => {
     setCurrentScreen('activeDevices')
   }
 
+  const chargingSession = () =>{
+    setCurrentScreen('chargingSession')
+  }
+
 
   return {
     currentScreen,
@@ -120,6 +124,7 @@ const useScreen = (initialScreen = 'Login') => {
     paymentConfirm,
     activeDevices,
     restoreSession,
+    chargingSession,
     // Các hàm shortcut cho từng màn hình
     goToLogin: () => navigateToScreen('Login'),
     goToForgotPassword: () => navigateToScreen('ForgotPassword'),

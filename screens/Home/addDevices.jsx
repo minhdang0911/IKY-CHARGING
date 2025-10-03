@@ -1,12 +1,12 @@
 // screens/Home/AddDevices.jsx
-import React, { useEffect, useMemo, useState, useContext, useRef, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Modal,
   SafeAreaView, KeyboardAvoidingView, Platform, ActivityIndicator, Clipboard, BackHandler,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { NotificationContext } from '../../App';
+// import { NotificationContext } from '../../App';
 import { getDeviceInfo, addDevice } from '../../apis/devices';
 
 const LANG_KEY = 'app_language';
@@ -91,11 +91,9 @@ export default function AddDevices({ navigateToScreen, screenData, navigation })
   const [confirmInfo, setConfirmInfo] = useState(null);
   const [rawInfo, setRawInfo] = useState(null);
 
-  // Notification context
-  const { notifications, setNotifications } = useContext(NotificationContext);
-  const unreadCount = (notifications || []).filter(n => !n.isRead).length;
+  // 🔕 Không dùng NotificationContext nữa
+  const unreadCount = 0;
   const handleBellPress = () => {
-    setNotifications?.(prev => prev.map(n => ({ ...n, isRead: true })));
     navigateToScreen('notification', { from: 'addDevices' });
   };
 
@@ -190,32 +188,25 @@ export default function AddDevices({ navigateToScreen, screenData, navigation })
   }, [navigateToScreen]);
 
   const handleBack = useCallback(() => {
-    // Ưu tiên đóng modal xác nhận trước
     if (confirmOpen) {
       setConfirmOpen(false);
-      return true; // chặn default
-    }
-    // Nếu đang loading/adding có thể chặn back (tuỳ yêu cầu)
-    if (loading || adding) {
-      // chặn back khi đang tiến trình để tránh lỗi
       return true;
     }
-    // điều hướng về màn Device
+    if (loading || adding) {
+      return true;
+    }
     goDevice();
     return true;
   }, [confirmOpen, loading, adding, goDevice]);
 
-  // Android hardware back
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', handleBack);
     return () => sub.remove();
   }, [handleBack]);
 
-  // iOS back gesture (react-navigation)
   useEffect(() => {
     if (!navigation || typeof navigation.addListener !== 'function') return;
     const unsub = navigation.addListener('beforeRemove', (e) => {
-      // Nếu người dùng vuốt back hoặc bấm back trên header iOS
       e.preventDefault();
       handleBack();
     });

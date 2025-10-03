@@ -6,7 +6,7 @@
 	<string>en</string>
 
 	<key>CFBundleDisplayName</key>
-	<string>Visacoop GPS</string>
+	<string>ikycharging</string>
 
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
@@ -28,6 +28,11 @@
 
 	<key>CFBundleSignature</key>
 	<string>????</string>
+
+	<key>NSPhotoLibraryAddUsageDescription</key>
+<string>Cần quyền để lưu mã QR vào thư viện ảnh</string>
+<key>NSPhotoLibraryUsageDescription</key>
+<string>Cần quyền để lưu mã QR vào thư viện ảnh</string>
 
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>

@@ -1,0 +1,11 @@
+export const LANG_KEY = 'app_language';
+export const REMEMBER_LOGIN_KEY = 'remember_login';
+export const USERNAME_KEY = 'username';
+export const ACCESS_TOKEN_KEY = 'access_token';
+export const REFRESH_TOKEN_KEY = 'refresh_token';
+export const USER_ID_KEY = 'user_id';
+export const USER_ROLE_KEY = 'user_role';
+export const AGENT_ID_KEY = 'agent_id';
+export const DASH_OVERVIEW_KEY = 'ev_cache_dashboard_overview_v1';
+export const DASH_REVENUE_KEY  = 'ev_cache_dashboard_revenue_v1';
+export const HISTORY_PREF_KEY  = 'EV_HISTORY_PREF';

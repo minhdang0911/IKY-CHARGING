@@ -5,39 +5,17 @@ import {
   StyleSheet,
   View,
   ActivityIndicator,
-  AppState,
   Text,
   Keyboard,
   Platform,
+  AppState,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// RNFirebase (modular v22+ style)
-import { getApp } from '@react-native-firebase/app';
-import {
-  getMessaging,
-  requestPermission,
-  getToken,
-  onMessage,
-  onTokenRefresh,
-  isDeviceRegisteredForRemoteMessages,
-  registerDeviceForRemoteMessages,
-  deleteToken as rnfbDeleteToken,
-  onNotificationOpenedApp,
-  getInitialNotification,
-} from '@react-native-firebase/messaging';
-
-import { requestAndroidPostNotifPermission } from './askNotifications';
 import useScreen from './Hooks/useScreen';
-import { getUserInfo, refreshAccessToken } from './apis/auth';
-import { registerFCMToken, deleteFCMToken } from './apis/fcm';
-import {
-  initPush,
-  showLocalNotification,
-  setOnOpenNotification,
-} from './PushNotificationConfig';
+import { refreshAccessToken } from './apis/auth';
 
-// ========== Screens ==========
+// ====== Screens ======
 import LoginScreen from './screens/auth/LoginScreen';
 import ForgotPasswordScreen from './screens/ForgotPassword/ForgotPasswordScreen';
 import ForgotPasswordStep2Screen from './screens/ForgotPassword/ForgotPasswordScreenStep2';
@@ -46,7 +24,7 @@ import MonitoringScreen from './screens/Home/MonitoringScreen';
 import JourneyScreen from './screens/Home/JourneyScreen';
 import DeviceScreen from './screens/Home/DeviceScreen';
 import InformationScreen from './screens/Home/InformationScreen';
-import BottomTabNavigation from './components/NavBottom/navBottom'; // hoặc './components/BottomTabNavigation'
+import BottomTabNavigation from './components/NavBottom/navBottom';
 import ChangeInfo from './screens/auth/ChangeInfo';
 import CompanyInfo from './screens/Company/CompanyInfo';
 import ChangePassword from './screens/auth/ChangePassword';
@@ -59,180 +37,131 @@ import Extend from './screens/Home/Extend';
 import OrderDetail from './screens/Home/OrderDetail';
 import PaymentConfirm from './screens/Home/PaymentConfirm';
 import ActiveDevicesScreen from './screens/Home/ActiveDevices';
+import ChargingSession from './screens/Home/ChargingSession';
 
-// ========== Storage Keys ==========
+// 🔌 SSE manager
+import sseManager from './utils/sseManager';
+
+// global
+import './apis/devices.global';
+
+// Storage keys
 const K_ACCESS = 'access_token';
 const K_REFRESH = 'refresh_token';
 const K_EXPIRES_AT = 'expires_at';
-const K_NOTI_QUEUE = 'noti_queue';
 const K_USERNAME = 'username';
 const K_USER_OID = 'user_oid';
 
-// ========= Auto Refresh (2h) =========
-const LOOP_MS = 2 * 60 * 60 * 1000;
-const MIN_GAP_MS = 60 * 1000;
+// ===== Auto refresh 2 phút =====
+const LOOP_MS = 30 * 60 * 1000; 
+const MIN_GAP_MS = 5 * 60 * 1000;
 
-let forceIntervalTimer = null;
+let refreshTimer = null;
 let refreshInFlight = null;
 let lastRefreshAt = 0;
+let loopArmed = false;  
 
-function clearTokenTimers() {
-  if (forceIntervalTimer) {
-    clearInterval(forceIntervalTimer);
-    forceIntervalTimer = null;
+function clearRefreshLoop() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
   }
+  loopArmed = false;
 }
 
-async function doRefreshToken() {
+async function hardLogout(navigateToScreen) {
+  try { sseManager.stop(); } catch {}
+  clearRefreshLoop();
+  try {
+    await AsyncStorage.multiRemove([K_ACCESS, K_REFRESH, K_EXPIRES_AT, K_USER_OID, K_USERNAME]);
+  } catch {}
+  navigateToScreen('Login');
+}
+
+// helper: ngủ ms
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function doRefreshToken(navigateToScreen, { force = false } = {}) {
   if (refreshInFlight) return refreshInFlight;
-  if (Date.now() - lastRefreshAt < MIN_GAP_MS) return;
+  if (!force && Date.now() - lastRefreshAt < MIN_GAP_MS) return;
 
   refreshInFlight = (async () => {
-    try {
-      const refresh = await AsyncStorage.getItem(K_REFRESH);
-      if (!refresh) return;
-      console.log('🔄 Refreshing access token (loop/2h)…');
+    const [refresh, access] = await Promise.all([
+      AsyncStorage.getItem(K_REFRESH),
+      AsyncStorage.getItem(K_ACCESS),
+    ]);
+    if (!refresh || !access) { refreshInFlight = null; return; }
 
-      const data = await refreshAccessToken(refresh);
-      await AsyncStorage.multiSet([
-        [K_ACCESS, data.access_token],
-        [K_REFRESH, data.refresh_token || refresh],
-      ]);
+    let attempt = 0;
+    let backoff = 2000; // 2s → 4s → 8s (max 30s)
 
-      lastRefreshAt = Date.now();
-      console.log('✅ Refreshed OK (loop/2h).');
-    } catch (e) {
-      const msg = e?.message || '';
-      console.log('❌ Refresh failed (loop/2h):', msg);
-      if (/invalid_grant|invalid refresh|expired/i.test(msg)) {
-        console.log('🚪 Refresh token invalid → force logout');
-        await AsyncStorage.multiRemove([
-          K_ACCESS,
-          K_REFRESH,
-          K_EXPIRES_AT,
-          K_USER_OID,
-          K_USERNAME,
-        ]);
+    while (true) {
+      try {
+        console.log('🔄 Refreshing access token… (attempt', attempt + 1, ')');
+        // ✅ truyền cả refresh + access vào
+        const data = await refreshAccessToken(refresh, access);
+
+        if (!data || (!data.accessToken && !data.refreshToken)) {
+          throw new Error('Bad refresh payload');
+        }
+
+        const pairs = [
+          [K_ACCESS, data.accessToken || ''],
+          [K_REFRESH, data.refreshToken || refresh],
+        ];
+        if (data.expires_at) pairs.push([K_EXPIRES_AT, String(data.expires_at)]);
+        await AsyncStorage.multiSet(pairs);
+
+        lastRefreshAt = Date.now();
+        console.log('✅ Refreshed OK.');
+        if (data.accessToken) {
+          try { sseManager.updateToken(data.accessToken); } catch {}
+        }
+        break; // DONE
+      } catch (e) {
+        const status = e?.response?.status;
+        const body = e?.response?.data;
+        const msg = status ? `HTTP ${status} ${JSON.stringify(body || {})}` : (e?.message || String(e));
+        console.log('❌ Refresh failed:', msg);
+
+        // 400/401/invalid -> logout
+        const lower = msg.toLowerCase();
+        const isAuthErr = status === 400 || status === 401
+          || /invalid_grant|invalid refresh|expired|unauthorized|invalid_token/.test(lower);
+
+        if (isAuthErr) {
+          console.log('🚪 Refresh token invalid → force logout');
+          await hardLogout(navigateToScreen);
+          break;
+        }
+
+        // 5xx / network → retry với backoff, giới hạn 3 lần
+        attempt += 1;
+        if (attempt >= 3) {
+          console.log('⏭️ Give up retry for now, will try again on next loop.');
+          break;
+        }
+        await sleep(backoff);
+        backoff = Math.min(backoff * 2, 30000);
       }
-    } finally {
-      refreshInFlight = null;
     }
+
+    refreshInFlight = null;
   })();
 
   return refreshInFlight;
 }
 
-async function startTwoHourRefreshLoop({ runNow = false } = {}) {
-  clearTokenTimers();
-  if (runNow) {
-    try {
-      await doRefreshToken();
-    } catch {}
-  }
-  forceIntervalTimer = setInterval(async () => {
-    try {
-      await doRefreshToken();
-    } catch {}
+function startRefreshLoopOnce(navigateToScreen) {
+  if (loopArmed) return;
+  clearRefreshLoop();
+  refreshTimer = setInterval(async () => {
+    try { await doRefreshToken(navigateToScreen); } catch {}
   }, LOOP_MS);
-  console.log('🕒 Auto-refresh started: every 2h');
+  loopArmed = true;
+  console.log(`🕒 Auto-refresh started: every ${Math.round(LOOP_MS / 60000)} minutes`);
 }
 
-// Context share notifications
-export const NotificationContext = React.createContext({
-  notifications: [],
-  setNotifications: () => {},
-});
-
-// ======= USER / OID =======
-async function fetchUserOid(accessToken) {
-  if (!accessToken) return '';
-  try {
-    const info = await getUserInfo(accessToken);
-    const oid = info?.sub?.oid || '';
-    if (oid) await AsyncStorage.setItem(K_USER_OID, oid);
-    if (info?.username) await AsyncStorage.setItem(K_USERNAME, info.username);
-    return oid;
-  } catch (e) {
-    console.log('⚠️ fetchUserOid error:', e?.message || e);
-    return '';
-  }
-}
-
-// ======= FCM REGISTER / UNREGISTER =======
-async function handleFCMOnLogin(accessToken) {
-  if (!accessToken) return;
-
-  try {
-    const msg = getMessaging(getApp());
-    const fcmToken = await getToken(msg);
-    if (!fcmToken) {
-      console.log('⚠️ Không có FCM token để xử lý');
-      return;
-    }
-
-    // Xoá map cũ
-    const oldOid = await AsyncStorage.getItem(K_USER_OID);
-    if (oldOid) {
-      console.log('🧹 Xóa token mapping cũ cho user:', oldOid);
-      try {
-        await deleteFCMToken({ accessToken, userID: oldOid, token: fcmToken });
-      } catch (e) {
-        console.log('⚠️ Xóa token mapping cũ failed:', e?.message);
-      }
-    }
-
-    // Lấy OID mới & đăng ký
-    const newOid = await fetchUserOid(accessToken);
-    if (!newOid) {
-      console.log('⚠️ Không lấy được OID mới để register FCM');
-      return;
-    }
-
-    console.log('✅ Register FCM token cho user mới:', newOid);
-    await registerFCMToken({ accessToken, userID: newOid, token: fcmToken });
-  } catch (e) {
-    console.log('❌ handleFCMOnLogin error:', e?.message || e);
-  }
-}
-
-async function unregisterFCMForCurrentUser() {
-  try {
-    const [accessToken, oid] = await Promise.all([
-      AsyncStorage.getItem(K_ACCESS),
-      AsyncStorage.getItem(K_USER_OID),
-    ]);
-    if (!accessToken || !oid) {
-      console.log('⚠️ Không có access token hoặc OID để unregister FCM');
-      return;
-    }
-
-    const msg = getMessaging(getApp());
-    let fcmToken = '';
-    try {
-      fcmToken = await getToken(msg);
-    } catch (e) {
-      console.log('⚠️ Không lấy được FCM token:', e?.message);
-    }
-
-    if (fcmToken) {
-      console.log('🗑️ Xóa FCM token mapping cho user:', oid);
-      await deleteFCMToken({ accessToken, userID: oid, token: fcmToken });
-    }
-
-    try {
-      await rnfbDeleteToken(msg);
-      console.log('🗑️ Đã xóa FCM token trên device');
-    } catch (e) {
-      console.log('⚠️ Xóa FCM token trên device failed:', e?.message);
-    }
-  } catch (e) {
-    console.log('⚠️ unregisterFCMForCurrentUser error:', e?.message || e);
-  } finally {
-    await AsyncStorage.multiRemove([K_USER_OID, K_USERNAME]);
-  }
-}
-
-// ====== MAP MÀN → TAB CHA (để icon tab luôn highlight đúng) ======
 const SCREEN_TO_TAB = {
   Monitoring: 'Monitoring',
   Journey: 'Journey',
@@ -245,11 +174,11 @@ const SCREEN_TO_TAB = {
   historyExtend: 'Device',
   extend: 'Device',
   activeDevices: 'Monitoring',
-  paymentConfirm:'Device'
+  paymentConfirm: 'Device',
+  chargingSession: 'Device',
 };
 
-// ========== App ==========
-function App() {
+export default function App() {
   const {
     currentScreen,
     screenData,
@@ -263,24 +192,14 @@ function App() {
   } = useScreen();
 
   const [booting, setBooting] = useState(true);
-  const [notifications, setNotifications] = useState([]);
-  const [screenBusy, setScreenBusy] = useState({ active: false, text: '' });
 
-  // 🔥 Loading overlay cho tác vụ nặng (logout)
+  // Busy overlay
   const [busy, setBusy] = useState({ active: false, text: '' });
   const busyRef = useRef(false);
-  const showBusy = (text = 'Đang xử lý…') => {
-    busyRef.current = true;
-    setBusy({ active: true, text });
-  };
-  const hideBusy = () => {
-    busyRef.current = false;
-    setBusy({ active: false, text: '' });
-  };
+  const showBusy = (text = 'Đang xử lý…') => { busyRef.current = true; setBusy({ active: true, text }); };
+  const hideBusy = () => { busyRef.current = false; setBusy({ active: false, text: '' }); };
 
-  const appStateRef = useRef('active');
-
-  // 👇 Theo dõi bàn phím để ẩn/hiện nav
+  // Ẩn tab khi mở keyboard
   const [kbVisible, setKbVisible] = useState(false);
   useEffect(() => {
     const showSub = Keyboard.addListener(
@@ -291,21 +210,47 @@ function App() {
       Platform.select({ ios: 'keyboardWillHide', android: 'keyboardDidHide' }),
       () => setKbVisible(false),
     );
+    return () => { showSub.remove(); hideSub.remove(); };
+  }, []);
+
+  // Giữ navigateToScreen mới nhất trong ref để handler SSE không bị recreate
+  const navRef = useRef(navigateToScreen);
+  useEffect(() => { navRef.current = navigateToScreen; }, [navigateToScreen]);
+
+  // SSE: token die → logout + Login (gắn 1 lần)
+  const sseHandlerAttached = useRef(false);
+  useEffect(() => {
+    if (sseHandlerAttached.current) return;
+    sseHandlerAttached.current = true;
+    sseManager.setAuthInvalidHandler(async () => {
+      console.log('[AUTH] SSE invalid/expired → force logout');
+      await hardLogout(navRef.current);
+    });
     return () => {
-      showSub.remove();
-      hideSub.remove();
+      sseManager.setAuthInvalidHandler(null);
+      sseHandlerAttached.current = false;
     };
   }, []);
 
-  // boot
+  // Boot
+  const bootOnce = useRef(false);
   useEffect(() => {
+    if (bootOnce.current) return;
+    bootOnce.current = true;
+
     (async () => {
       try {
         const access = await AsyncStorage.getItem(K_ACCESS);
         if (access) {
-          restoreSession('Monitoring');
-          await handleFCMOnLogin(access);
-          await startTwoHourRefreshLoop({ runNow: false });
+          restoreSession();
+
+          startRefreshLoopOnce(navigateToScreen); // chạy loop 1 lần
+          sseManager.start(access);
+
+          // 🔥 Refresh ngay để chắc token mới nhất & gắn vào SSE
+          try { await doRefreshToken(navigateToScreen, { force: true }); } catch {}
+        } else {
+          navigateToScreen('Login');
         }
       } catch (e) {
         console.warn('Auto login failed:', e?.message || e);
@@ -313,337 +258,76 @@ function App() {
         setBooting(false);
       }
     })();
-  }, []);
+  }, [navigateToScreen, restoreSession]);
 
-  // hút queue noti (background handler đã ghi)
-  const drainQueuedNotifications = async () => {
-    try {
-      const raw = (await AsyncStorage.getItem(K_NOTI_QUEUE)) || '[]';
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr) && arr.length) {
-        const mapped = arr.map(n => ({
-          ...n,
-          createdAt: new Date(n.createdAt),
-          isRead: n.isRead || false,
-        }));
-        setNotifications(prev => [...mapped, ...prev]);
-        await AsyncStorage.setItem(K_NOTI_QUEUE, '[]');
-      }
-    } catch {}
-  };
-
-  // khi app active lại
+  // AppState: foreground → refresh ngay; background → dừng loop
   useEffect(() => {
-    const sub = AppState.addEventListener('change', async next => {
-      if (
-        appStateRef.current.match(/inactive|background/) &&
-        next === 'active'
-      ) {
-        await drainQueuedNotifications();
-        setTimeout(() => {
-          doRefreshToken().catch(() => {});
-        }, 5000);
+    const sub = AppState.addEventListener('change', async (state) => {
+      if (state === 'active') {
+        try { await doRefreshToken(navigateToScreen, { force: true }); } catch {}
+        startRefreshLoopOnce(navigateToScreen);
+      } else {
+        clearRefreshLoop();
       }
-      appStateRef.current = next;
     });
-    return () => sub.remove();
-  }, []);
+    return () => { try { sub.remove(); } catch {} };
+  }, [navigateToScreen]);
 
-  // Local notification: tap -> mở màn notification
-  useEffect(() => {
-    initPush();
-    setOnOpenNotification(() => {
-      navigateToScreen('notification', { from: currentScreen });
-    });
-  }, [navigateToScreen, currentScreen]);
-
-  // Remote notification: tap từ background/quit
-  useEffect(() => {
-    let unsubOpened;
-    const wireOpenHandlers = async () => {
-      const app = getApp();
-      const msg = getMessaging(app);
-
-      unsubOpened = onNotificationOpenedApp(msg, remoteMessage => {
-        console.log('📬 Opened from background:', JSON.stringify(remoteMessage));
-        navigateToScreen('notification', { from: currentScreen });
-      });
-
-      const initial = await getInitialNotification(msg);
-      if (initial) {
-        console.log('🚀 Launched from notification:', JSON.stringify(initial));
-        navigateToScreen('notification', { from: currentScreen || 'Information' });
-      }
-    };
-
-    wireOpenHandlers();
-    return () => {
-      if (typeof unsubOpened === 'function') unsubOpened();
-    };
-  }, [navigateToScreen, currentScreen]);
-
-  // ==== FCM init (foreground + token refresh) ====
-  useEffect(() => {
-    let unsubFG, unsubRefresh;
-
-    const init = async () => {
-      const app = getApp();
-      const msg = getMessaging(app);
-
-      const authStatus = await requestPermission(msg);
-      console.log('🔐 iOS permission status:', authStatus);
-
-      try {
-        const registered = await isDeviceRegisteredForRemoteMessages(msg);
-        console.log('📡 device registered?', registered);
-        if (!registered) await registerDeviceForRemoteMessages(msg);
-      } catch (e) {
-        console.log('📡 registerDevice error:', e?.message);
-      }
-
-      const granted = await requestAndroidPostNotifPermission();
-      console.log('🔔 Android POST_NOTIFICATIONS granted?', granted);
-
-      const token = await getToken(msg);
-      console.log('📲 FCM Token:', token);
-
-      // Foreground messages
-      unsubFG = onMessage(msg, async rm => {
-        console.log('🔥 FG message:', JSON.stringify(rm));
-        const now = new Date();
-        const noti = {
-          id: String(now.getTime()),
-          createdAt: now,
-          title: rm.notification?.title || 'Thông báo',
-          message: rm.notification?.body || JSON.stringify(rm.data || {}),
-          isRead: false,
-        };
-        showLocalNotification(noti.title, noti.message);
-        setNotifications(prev => [noti, ...prev]);
-      });
-
-      // Token refresh
-      unsubRefresh = onTokenRefresh(msg, async () => {
-        try {
-          const accessToken = await AsyncStorage.getItem(K_ACCESS);
-          if (accessToken) await handleFCMOnLogin(accessToken);
-        } catch (e) {
-          console.log('⚠️ Token refresh handling error:', e?.message);
-        }
-      });
-
-      await drainQueuedNotifications();
-    };
-
-    init();
-    return () => {
-      if (typeof unsubFG === 'function') unsubFG();
-      if (typeof unsubRefresh === 'function') unsubRefresh();
-    };
-  }, []);
-
-  // ===== WRAP LOGIN/LOGOUT =====
   const handleLogin = async (userData = null) => {
     login(userData);
     try {
       const accessToken = await AsyncStorage.getItem(K_ACCESS);
       if (accessToken) {
-        await handleFCMOnLogin(accessToken);
-        await startTwoHourRefreshLoop({ runNow: false });
+        startRefreshLoopOnce(navigateToScreen);
+        sseManager.start(accessToken);
+        try { await doRefreshToken(navigateToScreen, { force: true }); } catch {}
       }
     } catch (e) {
-      console.log('⚠️ Login FCM/refresh handling error:', e?.message);
+      console.log('⚠️ Login/refresh handling error:', e?.message);
     }
   };
 
   const handleLogout = async () => {
-    if (busyRef.current) return; // chống double tap
+    if (busyRef.current) return;
     showBusy('Đang đăng xuất…');
-
     try {
-      clearTokenTimers();
-      await unregisterFCMForCurrentUser();
-      await AsyncStorage.multiRemove([
-        K_ACCESS,
-        K_REFRESH,
-        K_EXPIRES_AT,
-        K_USER_OID,
-        K_USERNAME,
-      ]);
+      try { sseManager.stop(); } catch {}
+      clearRefreshLoop();
+      await AsyncStorage.multiRemove([K_ACCESS, K_REFRESH, K_EXPIRES_AT, K_USER_OID, K_USERNAME]);
     } catch (e) {
       console.log('⚠️ Logout error:', e?.message || e);
     } finally {
       logout();
-      setNotifications([]);
       hideBusy();
     }
   };
 
-  // 🟡 Ẩn nav chỉ ở các màn auth/fullscreen thực sự cần ẩn
-  const screensWithoutBottomNav = [
-    'Login',
-    'ForgotPassword',
-    'forgotStep2',
-    'forgotStep3',
-    'changeInfo',
-    'AddDevices'
-  ];
+  const screensWithoutBottomNav = ['Login','ForgotPassword','forgotStep2','forgotStep3','changeInfo','AddDevices'];
 
   const renderCurrentScreen = () => {
     switch (currentScreen) {
-      case 'Login':
-        return (
-          <LoginScreen
-            navigateToScreen={navigateToScreen}
-            login={handleLogin}
-          />
-        );
-      case 'ForgotPassword':
-        return (
-          <ForgotPasswordScreen
-            goBack={goBack}
-            navigateToScreen={navigateToScreen}
-            screenData={screenData}
-          />
-        );
-      case 'forgotStep2':
-        return (
-          <ForgotPasswordStep2Screen
-            goBack={goBack}
-            navigateToScreen={navigateToScreen}
-            screenData={screenData}
-          />
-        );
-      case 'forgotStep3':
-        return (
-          <ForgotPasswordStep3Screen
-            goBack={goBack}
-            navigateToScreen={navigateToScreen}
-            screenData={screenData}
-          />
-        );
-      case 'Monitoring':
-        return (
-          <MonitoringScreen
-            logout={handleLogout}
-            navigateToScreen={navigateToScreen}
-          />
-        );
-      case 'devicesInfo':
-        return (
-          <DevicesInfo
-            logout={handleLogout}
-            navigateToScreen={navigateToScreen}
-            screenData={screenData}
-          />
-        );
-      case 'notification':
-        return (
-          <Notification
-            navigateToScreen={navigateToScreen}
-            screenData={screenData}
-          />
-        );
-      case 'paymentConfirm':
-        return (
-          <PaymentConfirm
-            navigateToScreen={navigateToScreen}
-            screenData={screenData}
-          />
-        );
-      case 'orderDetail':
-        return (
-          <OrderDetail
-            order={screenData?.order}
-            navigateToScreen={navigateToScreen}
-            device={screenData?.device}
-          />
-        );
-      case 'Journey':
-        return (
-          <JourneyScreen
-            logout={handleLogout}
-            navigateToScreen={navigateToScreen}
-            setAppBusy={setScreenBusy}
-          />
-        );
-      case 'extend':
-        return (
-          <Extend
-            logout={handleLogout}
-            navigateToScreen={navigateToScreen}
-            screenData={screenData}
-          />
-        );
-      case 'companyInfo':
-        return (
-          <CompanyInfo
-            logout={handleLogout}
-            navigateToScreen={navigateToScreen}
-          />
-        );
-      case 'changePassword':
-        return <ChangePassword navigateToScreen={navigateToScreen} />;
-      case 'Device':
-        return (
-          <DeviceScreen
-            logout={handleLogout}
-            navigateToScreen={navigateToScreen}
-          />
-        );
-      case 'phoneUser':
-        return (
-          <PhoneUser
-            screenData={screenData}
-            navigateToScreen={navigateToScreen}
-          />
-        );
-      case 'historyExtend':
-        return (
-          <HistoryExtend
-            logout={handleLogout}
-            navigateToScreen={navigateToScreen}
-            screenData={screenData}
-          />
-        );
-      case 'AddDevices':
-        return (
-          <AddDevices
-            navigateToScreen={navigateToScreen}
-            screenData={screenData}
-          />
-        );
-      case 'Information':
-        return (
-          <InformationScreen
-            changeInfo={changeInfo}
-            logout={handleLogout}
-            screenData={screenData}
-            navigateToScreen={navigateToScreen}
-          />
-        );
-      case 'changeInfo':
-        return (
-          <ChangeInfo
-            logout={handleLogout}
-            screenData={screenData}
-            navigateToScreen={navigateToScreen}
-          />
-        );
-      case 'activeDevices':
-        return (
-          <ActiveDevicesScreen
-            screenData={screenData}
-            navigateToScreen={navigateToScreen}
-          />
-        );
-      default:
-        return (
-          <LoginScreen
-            navigateToScreen={navigateToScreen}
-            login={handleLogin}
-          />
-        );
+      case 'Login': return <LoginScreen navigateToScreen={navigateToScreen} login={handleLogin} />;
+      case 'ForgotPassword': return <ForgotPasswordScreen goBack={goBack} navigateToScreen={navigateToScreen} screenData={screenData} />;
+      case 'forgotStep2': return <ForgotPasswordStep2Screen goBack={goBack} navigateToScreen={navigateToScreen} screenData={screenData} />;
+      case 'forgotStep3': return <ForgotPasswordStep3Screen goBack={goBack} navigateToScreen={navigateToScreen} screenData={screenData} />;
+      case 'Monitoring': return <MonitoringScreen logout={handleLogout} navigateToScreen={navigateToScreen} />;
+      case 'devicesInfo': return <DevicesInfo logout={handleLogout} navigateToScreen={navigateToScreen} screenData={screenData} />;
+      case 'notification': return <Notification navigateToScreen={navigateToScreen} screenData={screenData} />;
+      case 'paymentConfirm': return <PaymentConfirm navigateToScreen={navigateToScreen} screenData={screenData} />;
+      case 'orderDetail': return <OrderDetail order={screenData?.order} navigateToScreen={navigateToScreen} device={screenData?.device} />;
+      case 'Journey': return <JourneyScreen logout={handleLogout} navigateToScreen={navigateToScreen} setAppBusy={() => {}} />;
+      case 'extend': return <Extend logout={handleLogout} navigateToScreen={navigateToScreen} screenData={screenData} />;
+      case 'companyInfo': return <CompanyInfo logout={handleLogout} navigateToScreen={navigateToScreen} />;
+      case 'changePassword': return <ChangePassword navigateToScreen={navigateToScreen} />;
+      case 'Device': return <DeviceScreen logout={handleLogout} navigateToScreen={navigateToScreen} />;
+      case 'phoneUser': return <PhoneUser screenData={screenData} navigateToScreen={navigateToScreen} />;
+      case 'historyExtend': return <HistoryExtend logout={handleLogout} navigateToScreen={navigateToScreen} screenData={screenData} />;
+      case 'AddDevices': return <AddDevices navigateToScreen={navigateToScreen} screenData={screenData} />;
+      case 'Information': return <InformationScreen changeInfo={changeInfo} logout={handleLogout} screenData={screenData} navigateToScreen={navigateToScreen} />;
+      case 'changeInfo': return <ChangeInfo logout={handleLogout} screenData={screenData} navigateToScreen={navigateToScreen} />;
+      case 'activeDevices': return <ActiveDevicesScreen screenData={screenData} navigateToScreen={navigateToScreen} />;
+      case 'chargingSession': return <ChargingSession screenData={screenData} navigateToScreen={navigateToScreen} />;
+      default: return <LoginScreen navigateToScreen={navigateToScreen} login={handleLogin} />;
     }
   };
 
@@ -655,33 +339,22 @@ function App() {
     );
   }
 
-  // 🔵 Tính tab đang active & quyết định ẩn/hiện nav
   const currentTab = SCREEN_TO_TAB[currentScreen] || 'Monitoring';
   const hideTab = kbVisible || screensWithoutBottomNav.includes(currentScreen);
 
   return (
-    <NotificationContext.Provider value={{ notifications, setNotifications }}>
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#1e88e5" />
-        {renderCurrentScreen()}
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#1e88e5" />
+      {renderCurrentScreen()}
+      {!hideTab && <BottomTabNavigation currentScreen={currentTab} navigateToScreen={navigateToScreen} />}
 
-        {/* Nav dưới: luôn hiện, trừ khi hideTab = true */}
-        {!hideTab && (
-          <BottomTabNavigation
-            currentScreen={currentTab}     // 👈 dùng tab đã map để highlight đúng
-            navigateToScreen={navigateToScreen}
-          />
-        )}
-
-        {/* Overlay loading toàn màn */}
-        {busy.active && (
-          <View style={styles.overlay}>
-            <ActivityIndicator size="large" color="#fff" />
-            <Text style={styles.overlayText}>{busy.text || 'Đang xử lý…'}</Text>
-          </View>
-        )}
-      </View>
-    </NotificationContext.Provider>
+      {busy.active && (
+        <View style={styles.overlay}>
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={styles.overlayText}>{busy.text || 'Đang xử lý…'}</Text>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -694,12 +367,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 9999,
   },
-  overlayText: {
-    color: '#fff',
-    marginTop: 10,
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  overlayText: { color: '#fff', marginTop: 10, fontSize: 16, fontWeight: '600' },
 });
-
-export default App;

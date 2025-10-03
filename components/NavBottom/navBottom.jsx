@@ -1,20 +1,26 @@
 // components/BottomTabNavigation.jsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet,Image } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import icOverview from '../../assets/img/ic_overview.png';
+import icOverviewActive from '../../assets/img/ic_overview_active.png';
+
 
 const LANG_KEY = 'app_language';
+const ACTIVE_COLOR = '#4A90E2';
+const INACTIVE_COLOR = '#999';
+
 const STRINGS = {
   vi: {
     Monitoring: 'Giám sát',
-    Journey: 'Hành trình',
+    Journey: 'Tổng quan',
     Device: 'Thiết bị',
     Information: 'Thông tin',
   },
   en: {
     Monitoring: 'Monitoring',
-    Journey: 'Journey',
+    Journey: 'Overview',
     Device: 'Devices',
     Information: 'Info',
   },
@@ -33,15 +39,16 @@ const BottomTabNavigation = ({ currentScreen, navigateToScreen, hidden = false }
     })();
   }, []);
 
-  // 👇 Nếu hidden thì không render để khỏi chiếm chỗ
   if (hidden) return null;
 
-  const tabs = [
-    { id: 'Monitoring', icon: 'location-on' },
-    { id: 'Journey', icon: 'map' },
-    { id: 'Device', icon: 'directions-car' },
-    { id: 'Information', icon: 'info' },
-  ];
+  // 👇 Icons mới phù hợp với app trạm sạc
+   
+ const tabs = [
+  { id: 'Monitoring', icon: 'ev-station' },
+  { id: 'Journey', icon: icOverview, activeIcon: icOverviewActive },  
+  { id: 'Device', icon: 'router' },
+  { id: 'Information', icon: 'info' },
+];
 
   return (
     <View style={styles.container}>
@@ -55,9 +62,14 @@ const BottomTabNavigation = ({ currentScreen, navigateToScreen, hidden = false }
             accessibilityRole="button"
             accessibilityLabel={L[tab.id]}
           >
-            <View style={[styles.iconContainer, isActive && styles.activeIconContainer]}>
-              <Icon name={tab.icon} size={24} color={isActive ? '#00bcd4' : '#999'} />
-            </View>
+           <View style={[styles.iconContainer, isActive && styles.activeIconContainer]}>
+  {typeof tab.icon === 'string' ? (
+    <Icon name={tab.icon} size={24} color={isActive ? ACTIVE_COLOR : INACTIVE_COLOR} />
+  ) : (
+    <Image source={isActive ? tab.activeIcon : tab.icon} style={{ width: 28, height: 28, resizeMode: 'contain' }} />
+  )}
+</View>
+
             <Text style={[styles.tabTitle, isActive && styles.activeTabTitle]}>
               {L[tab.id]}
             </Text>
@@ -97,9 +109,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   activeIconContainer: {
-    backgroundColor: '#e3f9fd',
+    backgroundColor: '#eaf3fe',
     borderWidth: 2,
-    borderColor: '#00bcd4',
+    borderColor: ACTIVE_COLOR,
   },
   tabTitle: {
     fontSize: 12,
@@ -108,7 +120,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   activeTabTitle: {
-    color: '#00bcd4',
+    color: ACTIVE_COLOR,
     fontWeight: '600',
   },
 });

@@ -1,6 +1,6 @@
 // screens/Home/CompanyInfoScreen.jsx
 import Logo from '../../assets/img/logoky.png';
-import React, { useEffect, useState, useContext, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Image,
   Linking,
@@ -14,7 +14,8 @@ import {
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import styles, { PRIMARY } from './CompanyStyles';
-import { NotificationContext } from '../../App';
+// ✅ Bỏ NotificationContext
+// import { NotificationContext } from '../../App';
 
 const LANG_KEY = 'app_language';
 
@@ -45,13 +46,10 @@ const STRINGS = {
 
 const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
   const [language, setLanguage] = useState('vi');
-  const ctx = useContext(NotificationContext) || {};
-  const notifications = Array.isArray(ctx.notifications) ? ctx.notifications : [];
-  const setNotifications =
-    typeof ctx.setNotifications === 'function' ? ctx.setNotifications : () => {};
-  const unreadCount = notifications.reduce((acc, n) => acc + (n?.isRead ? 0 : 1), 0);
-
   const t = (k) => STRINGS[language][k] || k;
+
+  // 🔕 Không còn notifications context
+  const unreadCount = 0;
 
   useEffect(() => {
     (async () => {
@@ -63,7 +61,7 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
   }, []);
 
   const handleNotificationPress = () => {
-    setNotifications((prev) => (Array.isArray(prev) ? prev.map((n) => ({ ...n, isRead: true })) : []));
+    // chỉ điều hướng, không đụng context
     navigateToScreen && navigateToScreen('notification', { from: 'companyInfo' });
   };
 
@@ -97,7 +95,6 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
     return unsub;
   }, [navigation, handleBackPress]);
 
-  // Row component gọn
   const InfoRow = ({ icon, label, value, onPress, isLink }) => (
     <TouchableOpacity activeOpacity={onPress ? 0.9 : 1} onPress={onPress} style={styles.row}>
       <View style={styles.rowIconBox}>
@@ -125,7 +122,7 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
           <Icon name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('headerTitle')}</Text>
-        <TouchableOpacity style={styles.headerBtn} onPress={handleNotificationPress}>
+        {/* <TouchableOpacity style={styles.headerBtn} onPress={handleNotificationPress}>
           <View style={styles.notificationContainer}>
             <Icon name="notifications" size={22} color="#fff" />
             {unreadCount > 0 && (
@@ -134,10 +131,10 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
               </View>
             )}
           </View>
-        </TouchableOpacity>
+        </TouchableOpacity> */}
       </View>
 
-      {/* Body (no scroll, fit 1 màn) */}
+      {/* Body */}
       <View style={styles.bodyStatic}>
         {/* Logo + tên công ty */}
         <View style={styles.cardCenter}>
@@ -186,7 +183,6 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
           <Text style={styles.ghostBtnText}>{t('close')}</Text>
         </TouchableOpacity>
 
-        {/* spacing nhỏ cho safe area */}
         <View style={{ height: Platform.OS === 'ios' ? 4 : 8 }} />
       </View>
     </SafeAreaView>

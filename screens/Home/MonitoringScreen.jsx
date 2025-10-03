@@ -1,1162 +1,1010 @@
 // screens/Home/MonitoringScreen.jsx
-import React, { useState, useEffect, useRef, useMemo, useContext, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Modal, Alert,
-  Dimensions, Animated, Easing, Linking, Image, Platform, PermissionsAndroid, TextInput,
-  ActivityIndicator, KeyboardAvoidingView, ScrollView, TouchableWithoutFeedback, Keyboard,
+  View, Text, StyleSheet, TouchableOpacity,
+  FlatList, Platform, ToastAndroid, Alert, Image, Modal,
+  PermissionsAndroid, Linking
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import MapView, { Marker, Callout, PROVIDER_GOOGLE } from 'react-native-maps';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Geolocation from 'react-native-geolocation-service';
-import { API_PAY, GOONG_MAPS_API_KEY } from '@env';
+import QRCode from 'react-native-qrcode-svg';
+import RNFS from 'react-native-fs';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 
-import logoCar from '../../assets/img/ic_bike.png';
-import iconsDerection from '../../assets/img/ic_direction.png';
-import logoSOS from '../../assets/img/ic_sos_off.png';
-import logoMoto from '../../assets/img/ic_location_white_24dp.png';
-import logoStar from '../../assets/img/iconStart.png';
-import bannerExpires from '../../assets/img/ic_expired.png';
-import logoActive from '../../assets/img/ic_not_activated.png';
-import { NotificationContext } from '../../App';
-import { showMessage } from '../../components/Toast/Toast';
+// ICONS
+import plugOffline from '../../assets/img/ic_offline.png';
+import plugOnline from '../../assets/img/ic_online.png';
+import plugCharging from '../../assets/img/ic_charging.png';
 
-import { getDevices } from '../../apis/devices';
-import { getCruise } from '../../apis/cruise';
+// APIs
+import { getDevices, getDeviceInfo, getDashboardSessions } from '../../apis/devices';
 
-// MQTT (native TCP)
-import MQTT from 'sp-react-native-mqtt';
+// UI
+import EdgeDrawer from '../../components/EdgeDrawer';
+import PortCardSkeleton from '../../components/Skeletons/PortCardSkeleton';
 
-// QR scanner
-import QRCodeScanner from 'react-native-qrcode-scanner';
-import { RNCamera } from 'react-native-camera';
-
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+// SSE
+import sseManager from '../../utils/sseManager';
 
 /* ================= i18n ================= */
 const LANG_KEY = 'app_language';
 const STRINGS = {
   vi: {
-    headerList: (n) => `Danh sách xe (${n})`,
-    headerTitle: (plate) => `Giám sát xe: ${plate || '—'}`,
-    expiredTitle: (plate) => `Thiết bị ${plate || '—'} đã hết hạn sử dụng`,
-    expiredDesc: 'Vui lòng gia hạn để tiếp tục sử dụng dịch vụ.',
-    renewNow: 'Gia hạn ngay',
-    notice: 'Thông báo',
+    headerTitle: (name) => `Giám sát thiết bị: ${name || '—'}`,
     close: 'Đóng',
-    agree: 'Đồng ý',
-    loadingVehicles: 'Đang tải danh sách xe...',
-    retry: 'Thử lại',
-    vehiclePlate: (p) => `Biển số xe: ${p}`,
-    driver: (d) => `Lái xe: ${d || '—'}`,
-    expired: 'Hết hạn sử dụng',
-    expiryDate: (d) => `Ngày hết hạn: ${d || '—'}`,
-    calloutAtTime: (s) => `Tại thời điểm: ${s}`,
-    calloutCoord: (lat, lon) => `Tọa độ: ${lat} , ${lon}`,
-    calloutStatus: (s) => `Trạng thái: ${s}`,
-    calloutAddr: (a) => `Địa chỉ: ${a}`,
-    calloutFwr: (v) => `Phiên bản: ${v || '—'}`,
-    sosTitle: 'Cảnh báo',
-    sosMsg: 'Chế độ tắt máy khẩn cấp dùng khi bị cướp xe. Thiết bị sẽ hú còi, 30s sau tắt máy.',
-    sosHowto: 'Thao tác bên dưới sẽ gửi lệnh qua MQTT.',
-    sosOn: 'Kích hoạt SOS',
-    sosOff: 'Thoát SOS',
-    ok: 'Đóng',
-    errNoToken: 'Không lấy được danh sách thiết bị.',
-    errNoCruise: 'Không lấy được hành trình hiện tại.',
-    smsFail: 'Không mở được ứng dụng SMS.',
-    noPhone: 'Thiết bị chưa có số điện thoại.',
-    navToHere: 'Chỉ đường',
-    notifications: 'Thông báo',
-    notActivated: (id) => `Thiết bị ${id} chưa được kích hoạt`,
-    enterPhone: 'Số điện thoại chủ xe',
-    activateNow: 'Kích hoạt ngay',
-    or: 'Hoặc',
-    scanQR: 'Quét mã',
+    deviceName: (n) => `Thiết bị: ${n}`,
+    ports: (n) => `Số cổng: ${n}`,
+    port: 'Cổng',
+    portCardTitle: (dev, p) => `${dev} - ${p}`,
+    status: 'Trạng thái',
+    ready: 'Sẵn sàng',
+    charging: 'Đang sạc',
+    offline: 'Offline',
+    fault: 'Lỗi',
+    start: 'Bắt đầu',
+    end: 'Kết thúc',
+    power: 'Công suất sạc',
+    energy: 'Năng lượng tiêu thụ',
+    loading: 'Đang tải…',
+    noPorts: 'Không có cổng nào',
+    portDetail: 'Chi tiết cổng',
+    sessionTimeline: 'Dòng thời gian phiên',
+    devices: 'Thiết bị',
+    openLink: 'Mở liên kết',
+    saveQR: 'Tải QR',
+    tapQRHint: 'Chạm QR để mở link',
+    savedTo: (f) => `Đã lưu: ${f}`,
+    toastOpenLinkFail: 'Không mở được link',
+    toastNoPort: 'Không có thông tin cổng',
+    toastNeedStorage: 'Thiếu quyền lưu file',
+    toastNeedPhoto: 'Thiếu quyền truy cập thư viện ảnh',
+    toastQrNotReady: 'QR Code chưa sẵn sàng, vui lòng thử lại',
+    toastSaved: 'Đã lưu ảnh vào thư viện',
+    errLoadDevices: 'Load devices lỗi',
+    errLoadDeviceInfo: 'Load device info lỗi',
+    missingToken: 'Thiếu accessToken',
   },
   en: {
-    headerList: (n) => `Vehicles (${n})`,
-    headerTitle: (plate) => `Monitoring: ${plate || '—'}`,
-    expiredTitle: (plate) => `Device ${plate || '—'} has expired`,
-    expiredDesc: 'Please renew to continue using the service.',
-    renewNow: 'Renew now',
-    notice: 'Notice',
+    headerTitle: (name) => `Monitoring device: ${name || '—'}`,
     close: 'Close',
-    agree: 'Confirm',
-    loadingVehicles: 'Loading vehicles...',
-    retry: 'Retry',
-    vehiclePlate: (p) => `Plate: ${p}`,
-    driver: (d) => `Driver: ${d || '—'}`,
-    expired: 'Expired',
-    expiryDate: (d) => `Expiry date: ${d || '—'}`,
-    calloutAtTime: (s) => `At: ${s}`,
-    calloutCoord: (lat, lon) => `Coordinates: ${lat} , ${lon}`,
-    calloutStatus: (s) => `Status: ${s}`,
-    calloutAddr: (a) => `Address: ${a}`,
-    calloutFwr: (v) => `Firmware: ${v || '—'}`,
-    sosTitle: 'Emergency',
-    sosMsg: 'Emergency engine-off mode against theft. The device will siren and cut off after 30s.',
-    sosHowto: 'Actions below send commands via MQTT.',
-    sosOn: 'Activate SOS',
-    sosOff: 'Exit SOS',
-    ok: 'Close',
-    errNoToken: 'Failed to fetch devices.',
-    errNoCruise: 'Failed to fetch current cruise.',
-    smsFail: 'Failed to open SMS app.',
-    noPhone: 'Device phone number is missing.',
-    navToHere: 'Navigate',
-    notifications: 'Notifications',
-    notActivated: (id) => `Device ${id} not activated`,
-    enterPhone: 'Owner phone number',
-    activateNow: 'Activate now',
-    or: 'Or',
-    scanQR: 'Scan code',
+    deviceName: (n) => `Device: ${n}`,
+    ports: (n) => `Ports: ${n}`,
+    port: 'Port',
+    portCardTitle: (dev, p) => `${dev} - ${p}`,
+    status: 'Status',
+    ready: 'Ready',
+    charging: 'Charging',
+    offline: 'Offline',
+    fault: 'Fault',
+    start: 'Start',
+    end: 'End',
+    power: 'Charge power',
+    energy: 'Energy',
+    loading: 'Loading…',
+    noPorts: 'No ports',
+    portDetail: 'Port detail',
+    sessionTimeline: 'Session timeline',
+    devices: 'Devices',
+    openLink: 'Open link',
+    saveQR: 'Save QR',
+    tapQRHint: 'Tap QR to open link',
+    savedTo: (f) => `Saved: ${f}`,
+    toastOpenLinkFail: 'Failed to open link',
+    toastNoPort: 'Missing port info',
+    toastNeedStorage: 'Storage permission required',
+    toastNeedPhoto: 'Photo library permission required',
+    toastQrNotReady: 'QR Code not ready, please try again',
+    toastSaved: 'Saved to Photos',
+    errLoadDevices: 'Failed to load devices',
+    errLoadDeviceInfo: 'Failed to load device info',
+    missingToken: 'Missing accessToken',
   },
 };
 const useI18n = () => {
   const [lang, setLang] = useState('vi');
   useEffect(() => { (async () => { try { const s = await AsyncStorage.getItem(LANG_KEY); if (s) setLang(s); } catch {} })(); }, []);
   const t = (k, ...args) => {
-    const val = STRINGS[lang][k];
-    return typeof val === 'function' ? val(...args) : val ?? k;
+    const v = STRINGS[lang]?.[k];
+    return typeof v === 'function' ? v(...args) : (v ?? k);
   };
-  return { lang, t };
-};
-/* ===================================== */
-
-const toSec = (t) => {
-  if (!t && t !== 0) return undefined;
-  const n = Number(t);
-  if (Number.isNaN(n)) return undefined; 
-  return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
+  return { t, lang };
 };
 
-// "250822083850" -> Date
-const parseIkyTime = (str) => {
-  if (!/^\d{12}$/.test(String(str || ''))) return null;
-  const dd = Number(str.slice(0, 2));
-  const MM = Number(str.slice(2, 4)) - 1;
-  const yy = 2000 + Number(str.slice(4, 6));
-  const HH = Number(str.slice(6, 8));
-  const mm = Number(str.slice(8, 10));
-  const ss = Number(str.slice(10, 12));
-  try { return new Date(yy, MM, dd, HH, mm, ss); } catch { return null; }
-};
+/* ========== helpers ========== */
+const STATUS_COLOR = { ready: '#16a34a', charging: '#2563eb', offline: '#ef4444', fault: '#f59e0b' };
+const normalize = (s) => String(s || '').trim().toLowerCase();
 
-/* ========= Goong + fallback Nominatim ========= */
-const goongReverse = async (lat, lon, timeoutMs = 2500) => {
-  if (!GOONG_MAPS_API_KEY) return null;
-  const url = `https://rsapi.goong.io/Geocode?latlng=${lat},${lon}&api_key=${GOONG_MAPS_API_KEY}`;
-  const c = new AbortController(); const to = setTimeout(() => c.abort(), timeoutMs);
-  try {
-    const r = await fetch(url, { headers: { Accept: 'application/json' }, signal: c.signal });
-    if (!r.ok) return null;
-    const j = await r.json();
-    const first = j?.results?.[0];
-    if (!first) return null;
-    return first.formatted_address || first?.name || null;
-  } catch { return null; } finally { clearTimeout(to); }
-};
-const nomReverse = async (lat, lon, timeoutMs = 2500) => {
-  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1&namedetails=0&polygon_geojson=0&accept-language=vi`;
-  const c = new AbortController(); const to = setTimeout(() => c.abort(), timeoutMs);
-  try {
-    const r = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'rn-tracker/1.0' }, signal: c.signal });
-    const j = await r.json();
-    return j?.display_name || null;
-  } catch { return null; } finally { clearTimeout(to); }
-};
-async function reverseGeocodeVi(lat, lon) {
-  if (typeof lat !== 'number' || typeof lon !== 'number') return '—';
-  return (await goongReverse(lat, lon, 2500))
-      || (await nomReverse(lat, lon, 2500))
-      || (await goongReverse(lat, lon, 4000))
-      || '—';
+async function getAccessTokenSafe() {
+  const keys = ['accessToken', 'ACCESS_TOKEN', 'token', 'auth_token', 'access_token'];
+  for (const k of keys) { const v = await AsyncStorage.getItem(k); if (v) return v; }
+  return null;
 }
-/* ============================================= */
 
-const getVgpLikeJourney = (rec) => {
-  const v = Number(rec?.vgp ?? rec?.spd ?? rec?.speed);
-  return Number.isFinite(v) && v >= 0 ? v : null;
-};
-const statusFromDataLikeJourney = (rec) => {
-  if (rec?.acc != null) {
-    const accOn = Number(rec.acc) === 1;
-    const vgp = getVgpLikeJourney(rec);
-    if (accOn) return vgp != null && vgp > 0.1 ? 'Xe chạy' : 'Đỗ xe';
-    return 'Dừng xe';
+function isDeviceOffline(info) {
+  const s = normalize(info?.status);
+  const a = normalize(info?.availability);
+  return s === 'offline' || a === 'offline';
+}
+function formatDateTime(iso, lang = 'vi') {
+  if (!iso) return '—';
+  try {
+    const loc = lang === 'en' ? 'en-US' : 'vi-VN';
+    return new Date(iso).toLocaleString(loc);
+  } catch { return '—'; }
+}
+
+function trim0(n, dp = 2) {
+  if (!isFinite(n)) n = 0;
+  return Number(n).toFixed(dp).replace(/\.?0+$/, '');
+}
+function formatPowerKW(n) {
+  const v = Number(n) || 0;
+  const a = Math.abs(v);
+  return a < 1 ? `${Math.round(v * 1000)} W` : `${trim0(v, 2)} kW`;
+}
+function formatEnergyKWh(n) {
+  const v = Number(n) || 0;
+  const a = Math.abs(v);
+  return a < 1 ? `${Math.round(v * 1000)} Wh` : `${trim0(v, 2)} kWh`;
+}
+
+/* ====== Cache keys (SWR) ====== */
+const K_MONI_DEVICES_MENU = 'moni_devices_menu';
+const K_MONI_SELECTED_ID  = 'moni_selected_id';
+const K_MONI_DEVICE_MAP   = 'moni_device_map';
+const SWR_MAX_AGE_MS = 60 * 1000;
+
+/* ====== ADAPTER (web rule) ====== */
+function adaptDeviceInfoToUI(info, sessionsDev, lang) {
+  const name = info?.name || info?.device_code || '—';
+  const ports = Array.isArray(info?.ports) ? info.ports : [];
+  const deviceOffline = isDeviceOffline(info);
+
+  const sessionByPort = {};
+  if (sessionsDev && Array.isArray(sessionsDev.ports)) {
+    for (const p of sessionsDev.ports) {
+      if (p?.portNumber != null) sessionByPort[p.portNumber] = p.latestSession || null;
+    }
   }
-  const vgp = getVgpLikeJourney(rec);
-  if (vgp != null && vgp > 0.1) return 'Xe chạy';
-  if (vgp != null && vgp <= 0.1) return 'Đỗ xe';
-  return 'Dừng xe';
-};
-const spdTextLikeJourney = (rec) => {
-  const v = getVgpLikeJourney(rec);
-  return v != null ? `chạy xe ${v.toFixed(2)} km/h` : '0.00 km/h';
-};
 
-/* ================= Activation APIs (inline) ================= */
-const OTP_GEN = `${API_PAY}/api/sms/OTPgencode`;
-const ACTIVATE_BY_OTP  = `${API_PAY}/api/devices/activeByOTP`;
-const ACTIVATE_BY_CODE = `${API_PAY}/api/devices/activeByCode`;
+  const uiPorts = ports.map((p) => {
+    const sess = sessionByPort[p?.portNumber] || p?.latestSession || null;
 
-const toForm = (data) =>
-  Object.entries(data).filter(([, v]) => v != null)
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&');
+    const portStat = normalize(p?.status);
+    const sessStat = normalize(sess?.status);
 
-async function postForm(url, formObj, { timeoutMs = 15000, accessToken } = {}) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const headers = { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' };
-    if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
-    const res = await fetch(url, { method: 'POST', headers, body: toForm(formObj), signal: controller.signal });
-    const text = await res.text();
-    let data; try { data = JSON.parse(text); } catch { data = { kq: 0, msg: text }; }
-    return { httpStatus: res.status, data, rawText: text };
-  } finally { clearTimeout(timeout); }
-}
+    let visual;
+    let textStat;
 
-const getAccessToken = async () =>
-  (await AsyncStorage.getItem('access_token')) ||
-  (await AsyncStorage.getItem('accessToken')) ||
-  (await AsyncStorage.getItem('token'));
-
-async function sendActiveOTP(phoneNum) {
-  const { data } = await postForm(OTP_GEN, { action: 'register', phoneNum });
-  const kq = Number(data?.kq ?? 0);
-  const msg = data?.msg ?? null;
-  return { kq, msg, raw: data };
-}
-async function activateDeviceByOTP({ id, phoneNum, OTP }) {
-  const accessToken = await getAccessToken();
-  const { data } = await postForm(ACTIVATE_BY_OTP, { id, phoneNum, OTP }, { accessToken });
-  const kq = Number(data?.kq ?? 0);
-  const msg = data?.msg ?? null;
-  return { kq, msg, raw: data };
-}
-async function activateDeviceByCode({ id, code }) {
-  const accessToken = await getAccessToken();
-  const { data } = await postForm(ACTIVATE_BY_CODE, { id, code }, { accessToken });
-  const kq = Number(data?.kq ?? 0);
-  const msg = data?.msg ?? null;
-  return { kq, msg, raw: data };
-}
-/* =========================================================== */
-
-/* ===================== MQTT CONFIG ===================== */
-const MQTT_URI  = 'mqtt://mqtt.iky.vn:1883';
-const MQTT_USER = 'iky';
-const MQTT_PASS = 'IKY123456';
-const MQTT_QOS  = 1;
-
-const SOS_WAIT_MS = 5 * 60 * 1000;
-
-const makeClientId = (imei) =>
-  ('app' + String(imei || '').replace(/\D/g, '')).slice(0, 20) + (Math.random()*1000|0);
-
-const ts = () => {
-  const d = new Date();
-  return d.toLocaleTimeString() + '.' + String(d.getMilliseconds()).padStart(3, '0');
-};
-const mlog = (...args) => console.log('[MQTT]', ts(), ...args);
-/* ======================================================= */
-
-const MonitoringScreen = ({ logout, navigateToScreen }) => {
-  const { t } = useI18n();
-
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [showSOSModal, setShowSOSModal] = useState(false);
-  const [showFindVehicleModal, setShowFindVehicleModal] = useState(false);
-  const [showHeaderMenu, setShowHeaderMenu] = useState(false);
-
-  const [mapType, setMapType] = useState('standard');
-  useEffect(() => { (async () => {
-    try { const s = await AsyncStorage.getItem('monitoring_map_type'); if (s) setMapType(s); } catch {}
-  })(); }, []);
-  useEffect(() => { (async () => { try { await AsyncStorage.setItem('monitoring_map_type', mapType); } catch {} })(); }, [mapType]);
-
-  // DATA
-  const [accessToken, setAccessToken] = useState(null);
-  const [devices, setDevices] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
-
-  const [cruise, setCruise] = useState(null);
-  const [address, setAddress] = useState('—');
-  const [isLoading, setIsLoading] = useState(false);
-
-  // MQTT state
-  const clientRef = useRef(null);
-  const connectedRef = useRef(false);
-  const connectingRef = useRef(false);
-  const shouldReconnectRef = useRef(true);
-  const sessionRef = useRef(0);
-  const reconnectTimerRef = useRef(null);
-  const sosPendingRef = useRef(false);
-  const sosTimeoutRef = useRef(null);
-  const sosTimerRef = useRef(null);
-  const [sosBusy, setSosBusy] = useState(false);
-  const [sosRemainingMs, setSosRemainingMs] = useState(0);
-
-  // QR Scan
-  const [showQRScanner, setShowQRScanner] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
-
-  // ANIMS
-  const headerMenuAnim = useRef(new Animated.Value(-250)).current;
-  const fabRotation = useRef(new Animated.Value(0)).current;
-  const headerIconRotation = useRef(new Animated.Value(0)).current;
-  const menu1Anim = useRef(new Animated.Value(0)).current;
-  const menu2Anim = useRef(new Animated.Value(0)).current;
-  const menu3Anim = useRef(new Animated.Value(0)).current;
-  const sosModalAnim = useRef(new Animated.Value(screenHeight)).current;
-  const { notifications, setNotifications } = useContext(NotificationContext);
-  const unreadCount = notifications.filter(n => !n.isRead).length;
-
-  const mapRef = useRef(null);
-  const markerRef = useRef(null);
-
-  const formatExpireDate = (iso) => {
-    if (!iso) return '—';
-    try { const d = new Date(iso); return d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
-    catch { return iso; }
-  };
-  const isExpired = (iso) => { if (!iso) return false; try { return new Date(iso).getTime() < Date.now(); } catch { return false; } };
-
-  const handleNotificationPress = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-    navigateToScreen('notification', { from: 'Monitoring' });
-  };
-
-  // INIT: token + devices (1 lần khi vào)
-  useEffect(() => {
-    (async () => {
-      try {
-        const token = await AsyncStorage.getItem('access_token');
-        setAccessToken(token || '');
-        const list = await getDevices(token || '');
-        const mapped = (list || []).map((d) => {
-          const exp = d?.date_exp || d?.expiry || d?.expired_at || d?.expire;
-          return {
-            id: d?._id || d?.id,
-            plateNumber: d?.license_plate || d?.imei || d?._id,
-            driver: d?.driver || d?.owner || '—',
-            expiryDate: formatExpireDate(exp),
-            rawExpiry: exp,
-            expired: isExpired(exp),
-            phone: d?.phone_number || d?.phone || '',
-            active: Number(d?.active ?? 0),
-            raw: d,
-          };
-        }).filter((x) => x.id);
-        setDevices(mapped);
-        if (mapped.length > 0) setSelectedId(mapped[0].id);
-      } catch (e) {
-        Alert.alert('Lỗi', t('errNoToken'));
-      }
-    })();
-  }, []);
-
-  // LOAD current cruise (1 lần khi đổi xe) + reverse geocode (Goong -> Nominatim)
-  useEffect(() => {
-    if (!accessToken || !selectedId) return;
-    (async () => {
-      try {
-        const c = await getCruise(accessToken, selectedId);
-        setCruise(c);
-        if (mapRef.current && c?.lat && c?.lon) {
-          mapRef.current.animateToRegion({ latitude: c.lat, longitude: c.lon, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 600);
-        }
-        const addr = await reverseGeocodeVi(c?.lat, c?.lon);
-        setAddress(addr);
-        // show callout 1 lần sau khi có đủ dữ liệu
-        setTimeout(() => markerRef.current?.showCallout(), 0);
-      } catch {
-        Alert.alert('Lỗi', t('errNoCruise'));
-      }
-    })();
-  }, [accessToken, selectedId]);
-
-  const selectedDevice = devices.find(d => d.id === selectedId);
-  const selectedImei = useMemo(() => {
-    const raw = selectedDevice?.raw;
-    const v = raw?.imei || selectedDevice?.imei || selectedDevice?.id || '';
-    return String(v).replace(/\D/g, '');
-  }, [selectedDevice]);
-  const topicReq = useMemo(() => (selectedImei ? `dev${selectedImei}` : ''), [selectedImei]);
-  const topicRes = useMemo(() => (selectedImei ? `app${selectedImei}` : ''), [selectedImei]);
-
-  const timeObj = useMemo(() => {
-    const tFromTim = parseIkyTime(cruise?.tim);
-    if (tFromTim) return tFromTim;
-    const secs = toSec(cruise?.created);
-    if (secs) return new Date(secs * 1000);
-    return null;
-  }, [cruise]);
-  const timeLabel = useMemo(() => (timeObj ? timeObj.toLocaleString('vi-VN') : '—'), [timeObj]);
-
-  // ============== ACTIVATION VIEW ==============
-  const [phoneNum, setPhoneNum] = useState('');
-  const handleSendActiveOTP = async () => {
-    try {
-      if (!phoneNum) return showMessage('Nhập số điện thoại');
-      if (!selectedDevice?.id) return showMessage('Thiếu ID thiết bị');
-      setIsLoading(true);
-      const res = await sendActiveOTP(phoneNum);
-      if (res.kq === 1) {
-        await AsyncStorage.multiSet([['active_phone', String(phoneNum)], ['active_device_id', String(selectedDevice.id)]]);
-        showMessage('OTP đã gửi. Nhập OTP ở bước sau.');
-        navigateToScreen('activeDevices');
-      } else {
-        showMessage(typeof res.msg === 'string' ? res.msg : 'Gửi OTP thất bại');
-      }
-    } catch (e) { showMessage(e?.message || 'Gửi OTP thất bại'); }
-    finally { setIsLoading(false); }
-  };
-  const handleScanQR = () => setShowQRScanner(true);
-  const onQRRead = async (event) => {
-    if (isScanning) return;
-    setIsScanning(true);
-    try {
-      const code = event?.data || event?.nativeEvent?.codeStringValue || event?.codeStringValue || '';
-      if (!code) { setIsScanning(false); return; }
-      setShowQRScanner(false);
-      if (!selectedDevice?.id) { showMessage('Thiếu ID thiết bị'); return; }
-      setIsLoading(true);
-      const res = await activateDeviceByCode({ id: selectedDevice.id, code: String(code).trim() });
-      if (res.kq === 1) { showMessage('Kích hoạt thành công'); navigateToScreen('Device'); }
-      else { showMessage(typeof res.msg === 'string' ? res.msg : 'Kích hoạt thất bại'); }
-    } catch (e) { showMessage(e?.message || 'Kích hoạt thất bại'); }
-    finally { setIsLoading(false); setIsScanning(false); }
-  };
-
-  // UI anims
-  const [isMenuOpenLocal, setIsMenuOpenLocal] = useState(false);
-  const fabToggle = () => {
-    const toValue = isMenuOpenLocal ? 0 : 1;
-    setIsMenuOpenLocal(!isMenuOpenLocal);
-    Animated.timing(fabRotation, { toValue, duration: 300, easing: Easing.ease, useNativeDriver: true }).start();
-    const anims = [
-      Animated.timing(menu1Anim, { toValue: isMenuOpenLocal ? 0 : -70, duration: 300, delay: isMenuOpenLocal ? 0 : 50, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-      Animated.timing(menu2Anim, { toValue: isMenuOpenLocal ? 0 : -120, duration: 300, delay: isMenuOpenLocal ? 50 : 100, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-      Animated.timing(menu3Anim, { toValue: isMenuOpenLocal ? 0 : -170, duration: 300, delay: isMenuOpenLocal ? 100 : 150, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-    ];
-    Animated.parallel(isMenuOpenLocal ? anims.reverse() : anims).start();
-  };
-  const openSOSModal = () => {
-    const show = () => {
-      setShowSOSModal(true);
-      Animated.timing(sosModalAnim, { toValue: 0, duration: 300, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
-    };
-    if (isMenuOpenLocal) { fabToggle(); setTimeout(show, 350); } else show();
-  };
-  const closeSOSModal = () => {
-    Animated.timing(sosModalAnim, { toValue: screenHeight, duration: 300, easing: Easing.in(Easing.quad), useNativeDriver: true }).start(() => setShowSOSModal(false));
-  };
-  const toggleHeaderMenu = () => {
-    const opening = !showHeaderMenu;
-    setShowHeaderMenu(opening);
-    Animated.timing(headerMenuAnim, { toValue: opening ? 0 : -250, duration: 300, easing: opening ? Easing.out(Easing.quad) : Easing.in(Easing.quad), useNativeDriver: true }).start();
-    Animated.timing(headerIconRotation, { toValue: opening ? 1 : 0, duration: 250, easing: Easing.ease, useNativeDriver: true }).start();
-  };
-  const openVehicleModalFromMenu = () => {
-    if (isMenuOpenLocal) { fabToggle(); setTimeout(() => setShowFindVehicleModal(true), 350); }
-    else setShowFindVehicleModal(true);
-  };
-  const closeFindVehicleModal = () => setShowFindVehicleModal(false);
-
-  async function ensureLocationPermission() {
-    if (Platform.OS === 'android') {
-      const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
-      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    if (deviceOffline) {
+      visual = 'offline'; textStat = 'offline';
+    } else if (portStat === 'busy') {
+      visual = 'charging'; textStat = 'charging';
+    } else if (portStat === 'idle') {
+      visual = 'ready'; textStat = 'ready';
+    } else if (['fault', 'error', 'unavailable'].includes(portStat)) {
+      visual = 'fault'; textStat = 'fault';
     } else {
-      const status = await Geolocation.requestAuthorization('whenInUse');
-      return status === 'granted' || status === 'authorized';
+      const isRun = ['running','in_progress','active','charging'].includes(sessStat);
+      visual = isRun ? 'charging' : 'ready';
+      textStat = isRun ? 'charging' : 'ready';
     }
-  }
-  async function openGoogleMapsFromHereTo(lat, lon) {
-    try {
-      if (!lat || !lon) { Alert.alert('Lỗi', 'Không có tọa độ để chỉ đường'); return; }
-      const androidIntent = `google.navigation:q=${lat},${lon}&mode=d`;
-      const webFallback = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=driving`;
-      let urlToOpen = webFallback;
-      if (Platform.OS === 'android') {
-        const canOpenIntent = await Linking.canOpenURL(androidIntent);
-        urlToOpen = canOpenIntent ? androidIntent : webFallback;
-      } else if (Platform.OS === 'ios') {
-        const iosGoogleMaps = `comgooglemaps://?daddr=${lat},${lon}&directionsmode=driving`;
-        const iosAppleMaps = `http://maps.apple.com/?daddr=${lat},${lon}&dirflg=d`;
-        if (await Linking.canOpenURL(iosGoogleMaps)) urlToOpen = iosGoogleMaps;
-        else if (await Linking.canOpenURL(iosAppleMaps)) urlToOpen = iosAppleMaps;
-      }
-      await Linking.openURL(urlToOpen);
-    } catch (err) {
-      console.log('Navigation error:', err);
-      Alert.alert('Lỗi', 'Không thể mở Google Maps');
-    }
+
+    return {
+      id: p?._id ?? `${p?.portNumber ?? 'x'}`,
+      portNumber: p?.portNumber,
+      name: String(p?.portNumber ?? '—'),
+      visualStatus: visual,
+      portTextStatus: textStat,
+      start: formatDateTime(sess?.startTime, lang),
+      end: formatDateTime(sess?.endTime, lang),
+      kw: p?.kw ?? 0,
+      kwh: sess?.energy_used_kwh ?? 0,
+    };
+  });
+
+  return {
+    id: info?._id ?? info?.device_code ?? 'unknown',
+    deviceId: info?._id ?? '',
+    agentId: info?.agent_id?._id ?? info?.agent_id ?? '',
+    code: info?.device_code ?? '',
+    name,
+    ports: uiPorts,
+    deviceStatus: deviceOffline ? 'offline' : 'online',
+    rawStatus: info?.status,
+  };
+}
+
+/* ========= LIVE OVERLAY by SSE (ưu tiên SSE) ========= */
+// TTL cho bản tin SSE; hết TTL thì trả về giá trị API
+const LIVE_TTL_MS = 10 * 1000;
+
+// Map<device_code, { powerKW?:number, energyKWh?:number, status?:'online'|'offline', ts:number }>
+const liveRef = { current: new Map() };
+
+// base UI (từ API/cache). Ta render = applyLiveToUI(base)
+ 
+
+function applyLiveToUI(ui) {
+  if (!ui?.code) return ui;
+  const entry = liveRef.current.get(ui.code);
+  if (!entry) return ui;
+
+  const isFresh = (Date.now() - entry.ts) <= LIVE_TTL_MS;
+  const next = { ...ui };
+
+  // overlay trạng thái nếu có packetType:2
+  if (entry.status) {
+    next.deviceStatus = String(entry.status).toLowerCase(); // 'online'|'offline'
   }
 
-  /* ====================== MQTT (giữ nguyên) ====================== */
-  const clearSosTimers = useCallback(() => {
-    if (sosTimeoutRef.current) { clearTimeout(sosTimeoutRef.current); sosTimeoutRef.current = null; }
-    if (sosTimerRef.current) { clearInterval(sosTimerRef.current); sosTimerRef.current = null; }
+  // overlay power/energy nếu còn fresh
+  if (isFresh && (typeof entry.powerKW === 'number' || typeof entry.energyKWh === 'number')) {
+    next.ports = (ui.ports || []).map(p => {
+      if (p?.visualStatus === 'charging') {
+        return {
+          ...p,
+          kw: (typeof entry.powerKW === 'number') ? entry.powerKW : p.kw,
+          kwh: (typeof entry.energyKWh === 'number') ? entry.energyKWh : p.kwh,
+        };
+      }
+      return p;
+    });
+  }
+
+  return next;
+}
+
+/* ===================== SCREEN ===================== */
+export default function MonitoringScreen() {
+  const { t, lang } = useI18n();
+
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const openDrawer = useCallback(() => setDrawerOpen(true), []);
+  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+  const [headerHeight, setHeaderHeight] = useState(0);
+
+  const [devicesMenu, setDevicesMenu] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [selectedDevice, setSelectedDevice] = useState(null);
+
+  const [loadingList, setLoadingList] = useState(false);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+    const baseDeviceRef = useRef(null);
+
+
+  const toast = useCallback((msg) => {
+    if (Platform.OS === 'android') ToastAndroid.show(msg, ToastAndroid.SHORT);
+    else Alert.alert('', msg);
   }, []);
 
-  const normImei = (s) => String(s || '').replace(/\D/g, '');
-  const isValidAck = (obj, expectImei) => {
-    if (!obj || typeof obj !== 'object') return false;
-    const hasDev = typeof obj.dev === 'string' || typeof obj.dev === 'number';
-    if (!hasDev) return false;
-    const sameImei = normImei(obj.dev) === normImei(expectImei);
-    if (!sameImei) return false;
-    const pidOk = typeof obj.pid === 'string' && obj.pid.length > 0;
-    const resOk = obj.res === 0 || obj.res === 1 || obj.res === '0' || obj.res === '1';
-    return pidOk && resOk;
+  const [showModal, setShowModal] = useState(false);
+  const [modalPort, setModalPort] = useState(null);
+  const openPortModal = useCallback((p) => { setModalPort(p); setShowModal(true); }, []);
+  const closePortModal = useCallback(() => setShowModal(false), []);
+
+  // QR ref (trong modal)
+  const qrRef = useRef(null);
+
+  /* ====== SWR: hydrate cache ====== */
+  useEffect(() => {
+    (async () => {
+      try {
+        const entries = await AsyncStorage.multiGet([K_MONI_DEVICES_MENU, K_MONI_SELECTED_ID, K_MONI_DEVICE_MAP]);
+        const [menuStr, sid, mapStr] = entries.map(([, v]) => v);
+        if (menuStr) { try { setDevicesMenu(JSON.parse(menuStr)); } catch {} }
+        if (sid) setSelectedId(sid);
+        if (sid && mapStr) {
+          try {
+            const map = JSON.parse(mapStr) || {};
+            const cached = map[sid];
+            if (cached?.ui) {
+              baseDeviceRef.current = cached.ui;
+              setSelectedDevice(applyLiveToUI(cached.ui));
+            }
+          } catch {}
+        }
+      } catch {}
+    })();
+  }, []);
+
+  const saveMenuToCache = useCallback(async (menu) => {
+    try { await AsyncStorage.setItem(K_MONI_DEVICES_MENU, JSON.stringify(menu)); } catch {}
+  }, []);
+  const saveSelectedId = useCallback(async (id) => {
+    try { await AsyncStorage.setItem(K_MONI_SELECTED_ID, id ?? ''); } catch {}
+  }, []);
+  const saveDeviceUiToCache = useCallback(async (deviceId, ui) => {
+    try {
+      const raw = await AsyncStorage.getItem(K_MONI_DEVICE_MAP);
+      const map = raw ? JSON.parse(raw) : {};
+      map[deviceId] = { ui, ts: Date.now() };
+      await AsyncStorage.setItem(K_MONI_DEVICE_MAP, JSON.stringify(map));
+    } catch {}
+  }, []);
+  const getCachedDevice = useCallback(async (deviceId) => {
+    try {
+      const raw = await AsyncStorage.getItem(K_MONI_DEVICE_MAP);
+      if (!raw) return null;
+      const map = JSON.parse(raw) || {};
+      return map[deviceId] || null;
+    } catch { return null; }
+  }, []);
+
+  /* ===== Loaders ===== */
+  const loadDeviceList = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoadingList(true);
+    try {
+      const token = await getAccessTokenSafe(); if (!token) throw new Error(t('missingToken'));
+      const res = await getDevices(token);
+      const arr = Array.isArray(res?.data) ? res.data : [];
+      arr.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      const menu = arr.map((item) => ({
+        id: item?._id ?? item?.device_code,
+        name: item?.name || item?.device_code || '—',
+        portsCount: Array.isArray(item?.ports) ? item.ports.length : 0,
+        createdAt: item?.createdAt || null,
+      }));
+      setDevicesMenu(menu);
+      saveMenuToCache(menu);
+
+      if (!selectedId && menu.length > 0) {
+        setSelectedId(menu[0].id);
+        saveSelectedId(menu[0].id);
+      }
+    } catch (e) {
+      console.warn('loadDeviceList error', e); toast(e?.message || t('errLoadDevices'));
+    } finally {
+      if (!silent) setLoadingList(false);
+    }
+  }, [selectedId, toast, saveMenuToCache, saveSelectedId, t]);
+
+  const fetchDeviceDetail = useCallback(async (deviceId) => {
+    const token = await getAccessTokenSafe(); if (!token) throw new Error(t('missingToken'));
+    const [infoRaw, sessionsRaw] = await Promise.all([ getDeviceInfo(token, deviceId), getDashboardSessions(token) ]);
+    const infoPayload = infoRaw?.data ?? infoRaw;
+    const sessionsArr = Array.isArray(sessionsRaw) ? sessionsRaw : [];
+    const sessionsDev =
+      sessionsArr.find((d) => d?._id === infoPayload?._id) ||
+      sessionsArr.find((d) => d?.device_code === infoPayload?.device_code) ||
+      null;
+    return adaptDeviceInfoToUI(infoPayload, sessionsDev, lang);
+  }, [lang, t]);
+
+  const loadDeviceDetail = useCallback(async (deviceId, { swr = true } = {}) => {
+    if (!deviceId) return;
+
+    if (swr) {
+      const cached = await getCachedDevice(deviceId);
+      if (cached?.ui) {
+        baseDeviceRef.current = cached.ui;
+        setSelectedDevice(applyLiveToUI(cached.ui));
+      }
+
+      const tooOld = !cached?.ts || (Date.now() - cached.ts > SWR_MAX_AGE_MS);
+      if (tooOld) {
+        try {
+          if (!cached?.ui) setLoadingDetail(true);
+          const uiBase = await fetchDeviceDetail(deviceId);
+          baseDeviceRef.current = uiBase;
+          const uiApplied = applyLiveToUI(uiBase);
+          setSelectedDevice(uiApplied);
+          saveDeviceUiToCache(deviceId, uiBase); // lưu base, không ghi đè overlay
+        } catch (e) {
+          console.warn('loadDeviceDetail(SWR) error', e);
+          !cached?.ui && toast(e?.message || t('errLoadDeviceInfo'));
+        } finally {
+          setLoadingDetail(false);
+        }
+      }
+    } else {
+      setLoadingDetail(true);
+      try {
+        const uiBase = await fetchDeviceDetail(deviceId);
+        baseDeviceRef.current = uiBase;
+        const uiApplied = applyLiveToUI(uiBase);
+        setSelectedDevice(uiApplied);
+        saveDeviceUiToCache(deviceId, uiBase);
+      } catch (e) {
+        console.warn('loadDeviceDetail error', e);
+        toast(e?.message || t('errLoadDeviceInfo'));
+      } finally {
+        setLoadingDetail(false);
+      }
+    }
+  }, [fetchDeviceDetail, getCachedDevice, saveDeviceUiToCache, toast, t]);
+
+  useEffect(() => { loadDeviceList({ silent: !!devicesMenu.length }); /* eslint-disable-line */ }, []);
+  useEffect(() => { if (selectedId) { saveSelectedId(selectedId); loadDeviceDetail(selectedId, { swr: true }); } /* eslint-disable-line */ }, [selectedId]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadDeviceList({ silent: true });
+      if (selectedId) await loadDeviceDetail(selectedId, { swr: false });
+    } finally { setRefreshing(false); }
+  }, [loadDeviceList, loadDeviceDetail, selectedId]);
+
+  /* ======= SSE: parse & overlay live theo device_code ======= */
+  const parseMaybeJson = (x) => {
+    if (x && typeof x === 'object') return x;
+    if (typeof x === 'string') {
+      try { return JSON.parse(x); } catch { return null; }
+    }
+    return null;
+  };
+  const toInt = (v) => {
+    if (typeof v === 'number') return v;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : NaN;
   };
 
-  const hardCloseClient = useCallback(async () => {
-    try {
-      shouldReconnectRef.current = false;
-      const c = clientRef.current;
-      if (c) {
-        try { if (topicRes) c.unsubscribe(topicRes, MQTT_QOS); } catch {}
-        try { c.disconnect(); } catch {}
-      }
-    } catch {}
-    clientRef.current = null;
-    connectedRef.current = false;
-    connectingRef.current = false;
-  }, [topicRes]);
-
-  const disconnectMqtt = useCallback(() => {
-    clearTimeout(reconnectTimerRef.current || undefined);
-    reconnectTimerRef.current = null;
-    hardCloseClient();
-    sosPendingRef.current = false;
-    clearSosTimers();
-    setSosBusy(false);
-    setSosRemainingMs(0);
-  }, [hardCloseClient, clearSosTimers]);
-
-  const connectMqtt = useCallback(() => {
-    if (!selectedImei || !topicRes) return;
-
-    sessionRef.current += 1;
-    const mySession = sessionRef.current;
-
-    hardCloseClient();
-
-    clearTimeout(reconnectTimerRef.current || undefined);
-    reconnectTimerRef.current = setTimeout(() => {
-      if (mySession !== sessionRef.current) return;
-
-      const clientId = makeClientId(selectedImei).slice(0, 23);
-      shouldReconnectRef.current = true;
-      connectingRef.current = true;
-
-      mlog('dial (TCP native)...', { clientId, uri: MQTT_URI });
-
-      MQTT.createClient({
-        uri: MQTT_URI,
-        clientId,
-        auth: true,
-        user: MQTT_USER,
-        pass: MQTT_PASS,
-        keepalive: 60,
-        clean: true,
-        tls: false,
-      }).then(client => {
-        if (mySession !== sessionRef.current) { try { client.disconnect(); } catch {} return; }
-
-        clientRef.current = client;
-
-        client.on('closed', () => {
-          if (mySession !== sessionRef.current) return;
-          mlog('closed');
-          connectedRef.current = false;
-          connectingRef.current = false;
-          if (shouldReconnectRef.current) {
-            clearTimeout(reconnectTimerRef.current || undefined);
-            reconnectTimerRef.current = setTimeout(() => {
-              if (mySession === sessionRef.current) connectMqtt();
-            }, 1000);
-          }
-        });
-
-        client.on('error', (e) => {
-          if (mySession !== sessionRef.current) return;
-          mlog('ERROR:', e);
-          connectedRef.current = false;
-          connectingRef.current = false;
-          if (shouldReconnectRef.current) {
-            clearTimeout(reconnectTimerRef.current || undefined);
-            reconnectTimerRef.current = setTimeout(() => {
-              if (mySession === sessionRef.current) connectMqtt();
-            }, 1000);
-          }
-        });
-
-        client.on('message', (msg) => {
-          if (mySession !== sessionRef.current) return;
-          const text = String(msg.data || '');
-          mlog('RX', msg.topic, text);
-          if (msg.topic !== topicRes) return;
-
-          let data;
-          try { data = JSON.parse(text); } catch { mlog('bad JSON'); return; }
-          if (!isValidAck(data, selectedImei)) {
-            mlog('IGNORED ACK (invalid payload)', data);
-            return;
-          }
-
-          const ok = Number(data.res) === 1;
-          if (sosPendingRef.current) {
-            sosPendingRef.current = false;
-            setSosBusy(false);
-            clearSosTimers();
-            setSosRemainingMs(0);
-            Alert.alert(ok ? 'Thành công' : 'Thất bại', ok ? 'Lệnh SOS đã được xử lý.' : 'Thiết bị báo lỗi.');
-            if (ok) closeSOSModal();
-          }
-        });
-
-        client.on('connect', () => {
-          if (mySession !== sessionRef.current) return;
-          mlog('CONNECTED');
-          connectedRef.current = true;
-          connectingRef.current = false;
-          try { client.subscribe(topicRes, MQTT_QOS); } catch {}
-        });
-
-        client.connect();
-      }).catch(err => {
-        if (mySession !== sessionRef.current) return;
-        connectingRef.current = false;
-        mlog('createClient err:', err?.message || String(err));
-        Alert.alert('⚠️', 'Không kết nối được MQTT (1883).');
-      });
-    }, 150);
-  }, [selectedImei, topicRes, hardCloseClient]);
+  const getSelectedDeviceCode = useCallback(() => {
+    // tìm code của thiết bị đang xem
+    let code = baseDeviceRef.current?.code || selectedDevice?.code;
+    if (!code && selectedId && devicesMenu.length) {
+      // nothing — đợi fetch detail
+    }
+    return code;
+  }, [selectedDevice, selectedId, devicesMenu.length]);
 
   useEffect(() => {
-    connectMqtt();
-    return () => disconnectMqtt();
-  }, [connectMqtt, disconnectMqtt]);
+    const off = sseManager.on((evt) => {
+      if (evt?.type !== 'message') return;
 
-  const startSosCountdown = useCallback(() => {
-    setSosRemainingMs(SOS_WAIT_MS);
-    if (sosTimerRef.current) { clearInterval(sosTimerRef.current); }
-    sosTimerRef.current = setInterval(() => {
-      setSosRemainingMs(prev => {
-        const next = prev - 1000;
-        return next >= 0 ? next : 0;
-      });
+      let data = evt.data;
+      const obj = parseMaybeJson(data) || data;
+      if (!obj) return;
+
+      // packetType có thể là number hoặc string
+      const pt = toInt(obj?.packetType);
+      const code = obj?.device_code || obj?.deviceCode || obj?.deviceID || obj?.deviceId || null;
+
+      if (!code || !Number.isFinite(pt)) return;
+
+      // Lấy entry hiện tại để preserve fields
+      const cur = liveRef.current.get(code) || {};
+
+      if (pt === 1) {
+        // Power/Energy
+        // kw array ví dụ: [0.037, 0.02, 0]
+        const arr = Array.isArray(obj?.kw) ? obj.kw : null;
+        const powerKW = Number(arr?.[0]) || 0;
+        const energyKWh = Number(arr?.[1]) || 0;
+        liveRef.current.set(code, {
+          powerKW,
+          energyKWh,
+          status: cur.status, // giữ status nếu có
+          ts: Date.now(),
+        });
+      } else if (pt === 2) {
+        // Status online/offline
+        const st = normalize(obj?.status);
+        const mapped = (st === 'offline') ? 'offline' : (st === 'online' ? 'online' : undefined);
+        liveRef.current.set(code, {
+          powerKW: cur.powerKW,
+          energyKWh: cur.energyKWh,
+          status: mapped,
+          ts: Date.now(),
+        });
+      } else {
+        // các packet khác bỏ qua
+        return;
+      }
+
+      // Nếu đây là device đang mở → re-apply overlay để render ngay
+      const showing = getSelectedDeviceCode();
+      if (showing && showing === code && baseDeviceRef.current) {
+        setSelectedDevice(applyLiveToUI(baseDeviceRef.current));
+      }
+    });
+
+    return () => { try { off?.(); } catch {} };
+  }, [getSelectedDeviceCode]);
+
+  // Tick mỗi 1s để TTL tự rớt overlay nếu hết hạn (khỏi phụ thuộc thêm SSE)
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!baseDeviceRef.current) return;
+      // Re-apply sẽ tự bỏ overlay nếu hết TTL
+      setSelectedDevice(applyLiveToUI(baseDeviceRef.current));
     }, 1000);
+    return () => clearInterval(id);
   }, []);
 
-  const sendSosMqtt = useCallback((on) => {
-    if (!selectedImei) return;
-    if (!connectedRef.current || !clientRef.current) {
-      Alert.alert('⚠️', 'Không kết nối được MQTT (1883).');
+  /* ===== Skeleton / header ===== */
+  const expectedPorts = (() => {
+    if (selectedDevice?.ports?.length) return selectedDevice.ports.length;
+    const m = devicesMenu.find(d => d.id === selectedId);
+    if (m?.portsCount) return m.portsCount;
+    return 8;
+  })();
+  const isLoadingPorts = !selectedDevice || loadingDetail || !(selectedDevice?.ports?.length > 0);
+
+  const menuSelected = devicesMenu.find(d => d.id === selectedId);
+  const headerName = selectedDevice?.name || menuSelected?.name || t('loading');
+  const headerPortsText = (() => {
+    if (isLoadingPorts) {
+      return menuSelected?.portsCount != null
+        ? t('ports', menuSelected.portsCount)
+        : t('ports', '…');
+    }
+    return t('ports', selectedDevice?.ports?.length || 0);
+  })();
+
+  /* ===== helpers QR ===== */
+  const buildCheckoutUrl = useCallback((portNumber) => {
+    const agentId = selectedDevice?.agentId || '';
+    const deviceId = selectedDevice?.deviceId || '';
+    const p = portNumber ?? modalPort?.portNumber ?? '';
+    return `https://ev-charging.iky.vn/checkout.html?agentId=${encodeURIComponent(agentId)}&deviceId=${encodeURIComponent(deviceId)}&port=${encodeURIComponent(p)}`;
+  }, [selectedDevice, modalPort]);
+
+  const openLink = useCallback(async (url) => {
+    try { await Linking.openURL(url); } catch { toast(t('toastOpenLinkFail')); }
+  }, [toast, t]);
+
+  const saveQrPng = useCallback(async () => {
+    if (!modalPort) {
+      toast(t('toastNoPort'));
       return;
     }
-    if (sosPendingRef.current) return;
 
-    sosPendingRef.current = true;
-    setSosBusy(true);
-    startSosCountdown();
-
-    const payload = { imei: selectedImei, pid: 'android', key: on ? 1 : 0 };
-    mlog('PUBLISH ->', topicReq, payload);
     try {
-      clientRef.current.publish(topicReq, JSON.stringify(payload), MQTT_QOS, false);
-    } catch (e) {
-      mlog('publish err:', e?.message);
-      sosPendingRef.current = false;
-      setSosBusy(false);
-      clearSosTimers();
-      setSosRemainingMs(0);
-      Alert.alert('⚠️', 'Gửi lệnh thất bại.');
-      return;
+      // iOS permission placeholder
+      if (Platform.OS === 'ios') {
+        const permission = await PermissionsAndroid.request('ios.permission.PHOTO_LIBRARY_ADD_ONLY');
+        if (permission === 'denied') {
+          toast(t('toastNeedPhoto'));
+          return;
+        }
+      }
+
+      // Android < 29 cần WRITE_EXTERNAL_STORAGE
+      if (Platform.OS === 'android' && Platform.Version < 29) {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          toast(t('toastNeedStorage'));
+          return;
+        }
+      }
+
+      if (!qrRef.current) {
+        toast(t('toastQrNotReady'));
+        return;
+      }
+
+      qrRef.current.toDataURL(async (base64Data) => {
+        try {
+          const fname = `qr_${selectedDevice?.code || 'device'}_port${modalPort.portNumber}_${Date.now()}.png`;
+
+          // save temp
+          const tempPath = `${RNFS.CachesDirectoryPath}/${fname}`;
+          await RNFS.writeFile(tempPath, base64Data, 'base64');
+
+          // save to Photos/Gallery
+          await CameraRoll.save(tempPath, { type: 'photo' });
+
+          // cleanup
+          await RNFS.unlink(tempPath).catch(() => {});
+
+          toast(t('toastSaved'));
+        } catch (writeError) {
+          console.error('Save error:', writeError);
+          toast('' + (writeError?.message || writeError));
+        }
+      });
+    } catch (error) {
+      console.error('saveQrPng error:', error);
+      toast('' + (error?.message || error));
     }
+  }, [modalPort, selectedDevice, toast, t]);
 
-    sosTimeoutRef.current = setTimeout(() => {
-      if (!sosPendingRef.current) return;
-      sosPendingRef.current = false;
-      setSosBusy(false);
-      clearSosTimers();
-      setSosRemainingMs(0);
-      Alert.alert('Hết thời gian chờ', 'Không nhận phản hồi từ thiết bị. Vui lòng thử lại.');
-    }, SOS_WAIT_MS);
-  }, [selectedImei, topicReq, startSosCountdown, clearSosTimers]);
+  /* ===== UI ===== */
+  const renderItem = useCallback(({ item }) => {
+    // Ưu tiên rule web qua visualStatus + deviceStatus
+    const icon =
+      selectedDevice?.deviceStatus === 'offline'
+        ? plugOffline
+        : (item.visualStatus === 'charging'
+            ? plugCharging
+            : (item.visualStatus === 'ready' ? plugOnline : plugOffline)); // 'fault' -> tạm dùng offline icon
 
-  const toggleMapType = () => setMapType((prev) => (prev === 'standard' ? 'hybrid' : 'standard'));
+    const portLabel = `${t('port')} ${item.name}`;
 
-  // ============== RENDER ==============
-  const isInactive = !!selectedDevice && Number(selectedDevice.active) === 0;
+    return (
+      <TouchableOpacity activeOpacity={0.9} onPress={() => { setModalPort(item); setShowModal(true); }}>
+        <View style={[styles.portCard, { marginHorizontal: 16 }]}>
+          <Text style={styles.portTitle}>{t('portCardTitle', selectedDevice?.name, portLabel)}</Text>
+
+          <View style={styles.portStatusWrap}>
+            <View style={styles.portIconWrap}>
+              <Image source={icon} style={styles.portIcon} resizeMode="contain" />
+            </View>
+            <View>
+              <Text style={styles.portStatusLabel}>{t('status')}</Text>
+              <Text style={[styles.portStatusValue, { color: STATUS_COLOR[item.portTextStatus] || '#333' }]}>
+                {t(item.portTextStatus)}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.row}><Text style={styles.kv}>{t('start')}</Text><Text style={styles.v}>{item.start}</Text></View>
+          <View style={styles.row}><Text style={styles.kv}>{t('end')}</Text><Text style={styles.v}>{item.end}</Text></View>
+          <View style={styles.row}>
+            <Text style={styles.kv}>{t('power')}</Text>
+            <Text style={styles.v}>{formatPowerKW(item.kw)}</Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.kv}>{t('energy')}</Text>
+            <Text style={styles.v}>{formatEnergyKWh(item.kwh)}</Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  }, [selectedDevice, t]);
+
+  const ListHeader = (
+    <View style={{ paddingHorizontal: 16, paddingTop: 10 }}>
+      <Text style={styles.deviceHeader}>{t('deviceName', headerName)}</Text>
+      <Text style={styles.deviceSub}>{headerPortsText}</Text>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.menuButton} onPress={toggleHeaderMenu}>
-          <Animated.View style={{ transform: [{ rotate: headerIconRotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] }) }] }}>
-            <Icon name={showHeaderMenu ? 'arrow-forward' : 'menu'} size={24} color="white" />
-          </Animated.View>
+      <View style={styles.header} onLayout={(e)=>setHeaderHeight(e.nativeEvent.layout.height)}>
+        <TouchableOpacity style={styles.menuButton} onPress={openDrawer}>
+          <Icon name="menu" size={24} color="white" />
         </TouchableOpacity>
+        <Text style={styles.headerTitle}>{t('headerTitle', headerName)}</Text>
+      </View>
 
-        <Text style={styles.headerTitle}>
-          {showHeaderMenu ? t('headerList', devices.length) : t('headerTitle', selectedDevice?.plateNumber)}
-        </Text>
+      {/* Drawer */}
+      <View pointerEvents="box-none" style={{ position:'absolute', left:0, right:0, bottom:0, top:headerHeight, zIndex:9998 }}>
+        <EdgeDrawer visible={drawerOpen} onClose={closeDrawer}>
+          <View style={styles.drawerHeader}>
+            <View style={styles.drawerBadge}><Icon name="ev-station" size={16} color="#fff" /></View>
+            <Text style={styles.drawerTitle}>{t('devices')}</Text>
+          </View>
+          <View style={{ height: 8 }} />
+          <FlatList
+            data={devicesMenu}
+            keyExtractor={(x) => String(x.id)}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                onPress={() => { setSelectedId(item.id); closeDrawer(); }}
+                style={[styles.deviceMenuItem, selectedId === item.id && { borderColor: '#111827', backgroundColor: '#f7faff' }]}
+              >
+                <View style={styles.deviceMenuIcon}><Icon name="memory" size={16} color="#fff" /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.deviceMenuName} numberOfLines={1}>{item.name}</Text>
+                  <Text style={styles.deviceMenuPorts}>{t('ports', item.portsCount)}</Text>
+                </View>
+                <Icon name="chevron-right" size={22} color="#9CA3AF" />
+              </TouchableOpacity>
+            )}
+            ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
+            contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }}
+            ListEmptyComponent={<Text style={{ color:'#6B7280', padding:16 }}>{t('loading')}</Text>}
+            showsVerticalScrollIndicator={false}
+          />
+        </EdgeDrawer>
+      </View>
 
-        <TouchableOpacity style={styles.notificationButton} onPress={handleNotificationPress}>
-          <View style={{ position: 'relative' }}>
-            <Icon name={showHeaderMenu ? 'refresh' : 'notifications'} size={24} color="white" />
-            {unreadCount > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+      {/* Main list */}
+      <View style={{ flex: 1 }}>
+        {isLoadingPorts ? (
+          <FlatList
+            data={Array.from({ length: expectedPorts })}
+            keyExtractor={(_, i) => `sk-${i}`}
+            ListHeaderComponent={ListHeader}
+            renderItem={() => <PortCardSkeleton />}
+            ItemSeparatorComponent={() => <View style={{ height: 0 }} />}
+            contentContainerStyle={{ paddingTop: 8, paddingBottom: 32 }}
+            showsVerticalScrollIndicator={false}
+          />
+        ) : (
+          <FlatList
+            data={selectedDevice?.ports || []}
+            keyExtractor={(p) => String(p.id)}
+            ListHeaderComponent={ListHeader}
+            renderItem={renderItem}
+            ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+            contentContainerStyle={{ paddingTop: 8, paddingBottom: 32 }}
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            removeClippedSubviews={false}
+            initialNumToRender={32}
+            maxToRenderPerBatch={32}
+            windowSize={10}
+            onEndReachedThreshold={0.1}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
+      </View>
+
+      {/* CENTER MODAL có QR */}
+      <Modal
+        visible={showModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={closePortModal}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={styles.modalOverlay}
+          onPress={closePortModal}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            style={styles.modalContainer}
+            onPress={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderLeft}>
+                <View style={styles.modalIconBadge}>
+                  <Icon name="bolt" size={20} color="#fff" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.modalTitle}>{t('portDetail')}</Text>
+                  {!!modalPort && (
+                    <Text style={styles.modalSubtitle}>
+                      {headerName} • {t('port')} {modalPort?.name} • {t(modalPort?.portTextStatus)}
+                    </Text>
+                  )}
+                </View>
+              </View>
+              <TouchableOpacity onPress={closePortModal} style={styles.modalCloseBtn}>
+                <Icon name="close" size={24} color="#111827" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Content */}
+            {!!modalPort && (
+              <View style={styles.modalContent}>
+                <View style={styles.modalInfoCard}>
+                  {[
+                    ['Port', `${t('port')} ${modalPort.name}`],
+                    [t('status'), t(modalPort.portTextStatus)],
+                    [t('start'), modalPort.start],
+                    [t('end'), modalPort.end],
+                    [t('power'), formatPowerKW(modalPort.kw)],
+                    [t('energy'), formatEnergyKWh(modalPort.kwh)],
+                  ].map(([k, v, i]) => (
+                    <View key={k} style={[
+                      styles.modalInfoRow,
+                      i === 0 && { borderTopWidth: 0 }
+                    ]}>
+                      <Text style={styles.modalInfoKey}>{k}</Text>
+                      <Text style={styles.modalInfoValue}>{v}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                {/* ==== QR AREA ==== */}
+                <Text style={styles.qrHint}>{t('tapQRHint')}</Text>
+                <View style={styles.qrWrap}>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
+                  >
+                    <View style={styles.qrBox}>
+                      <QRCode
+                        value={buildCheckoutUrl(modalPort.portNumber)}
+                        size={200}
+                        quietZone={10}
+                        getRef={(c) => { qrRef.current = c; }}
+                      />
+                    </View>
+                  </TouchableOpacity>
+
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity
+                      style={[styles.btnPrimary, { flex: 1 }]}
+                      onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
+                    >
+                      <Icon name="open-in-new" size={18} color="#fff" style={{ marginRight: 6 }} />
+                      <Text style={styles.btnPrimaryText}>{t('openLink')}</Text>
+                    </TouchableOpacity>
+
+                    <View style={{ width: 10 }} />
+
+                    <TouchableOpacity
+                      style={[styles.btnGhost, { flex: 1 }]}
+                      onPress={saveQrPng}
+                    >
+                      <Icon name="file-download" size={18} color="#2563EB" style={{ marginRight: 6 }} />
+                      <Text style={styles.btnGhostText}>{t('saveQR')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                {/* ==== /QR AREA ==== */}
               </View>
             )}
-          </View>
+          </TouchableOpacity>
         </TouchableOpacity>
-      </View>
-
-      {/* Side vehicle list */}
-      {showHeaderMenu && (
-        <View style={styles.headerMenuOverlay}>
-          <TouchableOpacity style={styles.headerMenuOverlayTouchable} onPress={toggleHeaderMenu} />
-          <Animated.View style={[styles.headerMenu, { transform: [{ translateX: headerMenuAnim }] }]}>
-            <View style={styles.headerMenuContent}>
-              {devices.map((v) => (
-                <TouchableOpacity
-                  key={v.id}
-                  style={styles.vehicleMenuItem}
-                  onPress={() => { toggleHeaderMenu(); setSelectedId(v.id); }}
-                >
-                  <View style={styles.vehicleMenuIcon}>
-                    <Image source={logoCar} style={styles.vehicleMenuImage} />
-                  </View>
-                  <View style={styles.vehicleMenuDetails}>
-                    <Text style={styles.vehicleMenuPlate}>{t('vehiclePlate', v.plateNumber)}</Text>
-                    <Text style={styles.vehicleMenuDriver}>{t('driver', v.driver)}</Text>
-                    {v.expired ? (
-                      <Text style={styles.vehicleMenuExpired}>{t('expired')}</Text>
-                    ) : (
-                      <Text style={styles.vehicleMenuExpiry}>{t('expiryDate', v.expiryDate)}</Text>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </Animated.View>
-        </View>
-      )}
-
-      {/* Content */}
-      <View style={styles.mapContainer}>
-        {/* INACTIVE */}
-        {isInactive ? (
-          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 0}>
-            <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-              <ScrollView contentContainerStyle={styles.activationWrap} keyboardShouldPersistTaps="handled">
-                <Text style={styles.activationTitle}>
-                  Thiết bị <Text style={{ fontWeight: 'bold' }}>{selectedDevice?.plateNumber || selectedDevice?.id}</Text> chưa được kích hoạt
-                </Text>
-                <Image source={logoActive} style={styles.activationImage} resizeMode="contain" />
-                <View style={styles.inputWrap}>
-                  <Icon name="smartphone" size={20} color="#666" style={{ marginRight: 8 }} />
-                  <TextInput style={styles.input} placeholder="Số điện thoại chủ xe" value={phoneNum} onChangeText={setPhoneNum} keyboardType="phone-pad" returnKeyType="done" blurOnSubmit />
-                </View>
-                <TouchableOpacity style={styles.activationBtn} onPress={handleSendActiveOTP} disabled={isLoading}>
-                  <Text style={styles.activationBtnText}>Kích hoạt ngay →</Text>
-                </TouchableOpacity>
-                <View style={styles.separatorWrap}>
-                  <View style={styles.line} />
-                  <Text style={styles.separator}>Hoặc</Text>
-                  <View style={styles.line} />
-                </View>
-                <TouchableOpacity onPress={handleScanQR} disabled={isLoading} style={styles.qrButton}>
-                  <Icon name="qr-code-scanner" size={20} color="#1E88E5" style={{ marginRight: 8 }} />
-                  <Text style={styles.qrButtonText}>Quét mã</Text>
-                </TouchableOpacity>
-                <Text style={styles.hotline}>
-                  Hoặc liên hệ bộ phận CSKH để được hỗ trợ{' '}
-                  <Text style={styles.hotlineLink} onPress={() => Linking.openURL('tel:0902806999')}>0902 806 999</Text>
-                </Text>
-              </ScrollView>
-            </TouchableWithoutFeedback>
-          </KeyboardAvoidingView>
-        ) : selectedDevice?.expired ? (
-          // EXPIRED
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 }}>
-            <Text style={styles.expiredTitle}>{t('expiredTitle', selectedDevice?.plateNumber)}</Text>
-            <Image source={bannerExpires} style={{ width: '80%', height: 180, marginBottom: 20 }} resizeMode="contain" />
-            <Text style={{ fontSize: 14, color: '#555', textAlign: 'center', marginBottom: 15 }}>{t('expiredDesc')}</Text>
-            <TouchableOpacity
-              style={{ backgroundColor: '#1e88e5', borderRadius: 25, paddingHorizontal: 30, paddingVertical: 12 }}
-              onPress={() => navigateToScreen('extend', { device: selectedDevice?.raw || selectedDevice })}
-            >
-              <Text style={{ color: '#fff', fontSize: 15, fontWeight: '600' }}>{t('renewNow')}</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          // NORMAL MAP
-          <>
-            <MapView
-              ref={mapRef}
-              provider={PROVIDER_GOOGLE}
-              style={styles.map}
-              mapType={mapType}
-              initialRegion={{
-                latitude: cruise?.lat || 10.76,
-                longitude: cruise?.lon || 106.66,
-                latitudeDelta: 0.02,
-                longitudeDelta: 0.02,
-              }}
-              showsCompass
-              showsBuildings
-              onMapReady={() => { markerRef.current?.showCallout(); }}  // chỉ show 1 lần khi vào
-            >
-              {cruise?.lat && cruise?.lon && (
-                <Marker
-                  ref={markerRef}
-                  coordinate={{ latitude: cruise.lat, longitude: cruise.lon }}
-                  anchor={{ x: 0.5, y: 1 }}
-                  tracksViewChanges={false}
-                >
-                  <Image source={logoStar} style={{ width: 36, height: 36 }} resizeMode="contain" />
-                  <Callout tooltip>
-                    <View style={styles.calloutWrap}>
-                      <View style={styles.calloutCard}>
-                        <Text style={styles.calloutLine}>{t('calloutAtTime', timeLabel)}</Text>
-                        <Text style={styles.calloutLine}>
-                          {t(
-                            'calloutCoord',
-                            typeof cruise?.lat === 'number' ? cruise.lat.toFixed(6) : '—',
-                            typeof cruise?.lon === 'number' ? cruise.lon.toFixed(6) : '—'
-                          )}
-                        </Text>
-                        {statusFromDataLikeJourney(cruise || {}) === 'Xe chạy' ? (
-                          <Text style={styles.calloutLine}>{t('calloutStatus', spdTextLikeJourney(cruise || {}))}</Text>
-                        ) : (
-                          <Text style={styles.calloutLine}>{t('calloutStatus', statusFromDataLikeJourney(cruise || {}))}</Text>
-                        )}
-                        <Text style={styles.calloutLine} numberOfLines={2}>{t('calloutAddr', address)}</Text>
-                        <Text style={styles.calloutLine}>{t('calloutFwr', cruise?.fwr)}</Text>
-                      </View>
-                      <View style={styles.calloutArrow} />
-                    </View>
-                  </Callout>
-                </Marker>
-              )}
-            </MapView>
-
-            {/* Toggle map type */}
-            <TouchableOpacity style={styles.mapTypeBtn} onPress={toggleMapType} activeOpacity={0.8}>
-              <Icon name="layers" size={18} color="#4A90E2" />
-              <Text style={styles.mapTypeText}>{mapType === 'standard' ? 'Vệ tinh' : 'Chuẩn'}</Text>
-            </TouchableOpacity>
-          </>
-        )}
-
-        {/* FAB Menu */}
-        {!selectedDevice?.expired && !isInactive && (
-          <View style={styles.fabContainer}>
-            <Animated.View
-              style={[styles.fabMenuItem, { transform: [{ translateY: menu3Anim }], opacity: menu3Anim.interpolate({ inputRange: [-170, 0], outputRange: [1, 0] }) }]}
-              pointerEvents={isMenuOpenLocal ? 'auto' : 'none'}
-            >
-              <TouchableOpacity
-                style={[styles.fabButton, styles.lockButton]}
-                onPress={() => { if (cruise?.lat && cruise?.lon) openGoogleMapsFromHereTo(cruise.lat, cruise.lon); }}
-              >
-                <Image source={iconsDerection} style={styles.fabIcon} />
-              </TouchableOpacity>
-            </Animated.View>
-
-            <Animated.View
-              style={[styles.fabMenuItem, { transform: [{ translateY: menu2Anim }], opacity: menu2Anim.interpolate({ inputRange: [-120, 0], outputRange: [1, 0] }) }]}
-              pointerEvents={isMenuOpenLocal ? 'auto' : 'none'}
-            >
-              <TouchableOpacity style={[styles.fabButton, styles.sosButton]} onPress={openSOSModal}>
-                <Image source={logoSOS} style={styles.fabIcon} />
-              </TouchableOpacity>
-            </Animated.View>
-
-            <Animated.View
-              style={[styles.fabMenuItem, { transform: [{ translateY: menu1Anim }], opacity: menu1Anim.interpolate({ inputRange: [-70, 0], outputRange: [1, 0] }) }]}
-              pointerEvents={isMenuOpenLocal ? 'auto' : 'none'}
-            >
-              <TouchableOpacity style={[styles.fabButton, styles.navigationButton]} onPress={openVehicleModalFromMenu}>
-                <Image source={logoMoto} style={styles.fabIcon} />
-              </TouchableOpacity>
-            </Animated.View>
-
-            <TouchableOpacity style={[styles.fabButton, styles.mainFabButton]} onPress={fabToggle}>
-              <Animated.View style={{ transform: [{ rotate: fabRotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] }) }] }}>
-                <Icon name="apps" size={24} color="white" />
-              </Animated.View>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-
-      {/* SOS Modal (MQTT) */}
-      <Modal visible={showSOSModal} transparent animationType="none" onRequestClose={closeSOSModal}>
-        <View style={styles.modalOverlay}>
-          <Animated.View style={[styles.sosModal, { transform: [{ translateY: sosModalAnim }] }]}>
-            <View style={styles.sosHeader}><Text style={styles.sosTitle}>{t('sosTitle')}</Text></View>
-            <View style={styles.sosContent}>
-              <Text style={styles.sosMessage}>{t('sosMsg')}</Text>
-            </View>
-            <View style={styles.sosButtons}>
-              <TouchableOpacity style={[styles.sosActivateButton, sosBusy && { opacity: 0.7 }]} onPress={() => sendSosMqtt(true)} disabled={sosBusy}>
-                <Text style={styles.sosActivateText}>{t('sosOn')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.sosExitButton, sosBusy && { opacity: 0.7 }]} onPress={() => sendSosMqtt(false)} disabled={sosBusy}>
-                <Text style={styles.sosExitText}>{t('sosOff')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.sosCloseButton} onPress={closeSOSModal} disabled={sosBusy}>
-                <Text style={styles.sosCloseText}>{t('ok')}</Text>
-              </TouchableOpacity>
-
-              {sosBusy && (
-                <View style={{ marginTop: 8, alignItems: 'center', gap: 6 }}>
-                  <ActivityIndicator />
-                  <Text style={{ color: '#666' }}>
-                    Đang đợi phản hồi từ thiết bị…
-                  </Text>
-                </View>
-              )}
-            </View>
-          </Animated.View>
-        </View>
       </Modal>
-
-      {/* Find Vehicle Modal */}
-      <Modal visible={showFindVehicleModal} transparent animationType="none" onRequestClose={closeFindVehicleModal}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.findVehicleModal, { transform: [{ translateY: 0 }] }]}>
-            <View style={styles.findVehicleHeader}><Text style={styles.findVehicleTitle}>{t('notice')}</Text></View>
-            <View style={styles.findVehicleContent}>
-              <Text style={styles.findVehicleMessage}>Chức năng tìm xe được điều khiển qua SMS. Bạn muốn thực hiện?</Text>
-            </View>
-            <View style={styles.findVehicleButtons}>
-              <TouchableOpacity style={styles.findVehicleCloseButton} onPress={closeFindVehicleModal}>
-                <Text style={styles.findVehicleCloseText}>{t('close')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.findVehicleConfirmButton}
-                onPress={async () => {
-                  try {
-                    let phone =
-                      selectedDevice?.phone ||
-                      selectedDevice?.raw?.phone_number ||
-                      selectedDevice?.raw?.phone;
-
-                    if (!phone) { Alert.alert(t('notice'), t('noPhone')); return; }
-
-                    phone = String(phone).trim();
-                    if (!phone.startsWith('0')) phone = '0' + phone;
-
-                    const base = Platform.select({
-                      ios: `sms:${phone}&body=${encodeURIComponent('TIMXE')}`,
-                      android: `sms:${phone}?body=${encodeURIComponent('TIMXE')}`,
-                      default: `sms:${phone}?body=${encodeURIComponent('TIMXE')}`,
-                    });
-
-                    const can = await Linking.canOpenURL(base);
-                    if (!can) { Alert.alert(t('notice'), t('smsFail')); return; }
-                    await Linking.openURL(base);
-                    Alert.alert(t('notice'), 'Tin nhắn tìm xe đã được soạn!');
-                    closeFindVehicleModal();
-                  } catch { Alert.alert(t('notice'), t('smsFail')); }
-                }}
-              >
-                <Text style={styles.findVehicleConfirmText}>{t('agree')}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* QR Scanner Modal */}
-      <Modal visible={showQRScanner} animationType="slide" onRequestClose={() => setShowQRScanner(false)}>
-        <View style={{ flex: 1, backgroundColor: '#000' }}>
-          <QRCodeScanner
-            vibrate={false}
-            onRead={onQRRead}
-            flashMode={RNCamera.Constants.FlashMode.auto}
-            reactivate={false}
-            showMarker
-            topContent={<Text style={{ color:'#fff', marginTop: 16 }}>Đưa QR vào khung để quét</Text>}
-            bottomContent={
-              <TouchableOpacity onPress={() => setShowQRScanner(false)} style={{ marginTop: 18, backgroundColor:'#0008', paddingHorizontal:14, paddingVertical:10, borderRadius:8 }}>
-                <Text style={{ color:'#fff' }}>Đóng</Text>
-              </TouchableOpacity>
-            }
-            cameraStyle={{ height: '100%' }}
-          />
-        </View>
-      </Modal>
-
-      {/* LOADING OVERLAY */}
-      {isLoading && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#fff" />
-        </View>
-      )}
     </View>
   );
-};
+}
 
-/* ===== styles ===== */
+/* ============== styles ============== */
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  container: { flex: 1, backgroundColor: '#F6F7FB' },
+
   header: {
-    backgroundColor: '#4A90E2', paddingHorizontal: 20, paddingVertical: 15, paddingTop: 25,
-    flexDirection: 'row', alignItems: 'center',
-  },
-  menuButton: { padding: 4, marginRight: 8 },
-  headerTitle: { color: 'white', fontSize: 18, fontWeight: '500', flex: 1 },
-  notificationButton: { padding: 4 },
-
-  mapContainer: { flex: 1, position: 'relative' },
-  map: { flex: 1 },
-
-  mapTypeBtn: {
-    position: 'absolute',
-    right: 12,
-    top: 12,
+    backgroundColor: '#4A90E2',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    paddingTop: 25,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e6e6e6',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
   },
-  mapTypeText: { fontSize: 12, color: '#4A90E2', fontWeight: '600' },
+  menuButton: { padding: 4, marginRight: 8 },
+  headerTitle: { color: 'white', fontSize: 18, fontWeight: '600', flex: 1 },
 
-  activationWrap: {
-    flexGrow: 1, minHeight: screenHeight - 140, alignItems: 'center', justifyContent: 'center',
-    padding: 20, backgroundColor: '#f9f9f9',
+  deviceMenuItem: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 14, paddingVertical: 12,
+    borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 12,
+    backgroundColor: '#fff'
   },
-  activationTitle: { fontSize: 16, marginVertical: 15, textAlign: 'center' },
-  activationImage: { width: 160, height: 160, marginBottom: 20 },
-
-  inputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#ccc', borderRadius: 8, paddingHorizontal: 10, width: '100%', backgroundColor: '#fff' },
-  input: { flex: 1, height: 44 },
-
-  activationBtn: { backgroundColor: '#1E88E5', borderRadius: 25, paddingVertical: 12, paddingHorizontal: 30, marginTop: 15, width: '100%', alignItems: 'center' },
-  activationBtnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
-
-  separatorWrap: { flexDirection: 'row', alignItems: 'center', marginVertical: 15, width: '100%' },
-  line: { flex: 1, height: 1, backgroundColor: '#ccc' },
-  separator: { marginHorizontal: 10, color: '#777' },
-
-  qrButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', paddingVertical: 10, paddingHorizontal: 14, borderRadius: 10, backgroundColor: '#E3F2FD' },
-  qrButtonText: { color: '#1E88E5', fontSize: 15, fontWeight: '600' },
-
-  hotline: { marginTop: 20, textAlign: 'center', color: '#333' },
-  hotlineLink: { color: '#1E88E5', textDecorationLine: 'underline' },
-
-  calloutWrap: { alignItems: 'center' },
-  calloutCard: { maxWidth: screenWidth * 0.85, minWidth: screenWidth * 0.65, backgroundColor: '#3b86e5', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 12 },
-  calloutLine: { color: '#fff', fontSize: 14, marginBottom: 4, flexShrink: 1 },
-  calloutArrow: {
-    width: 0, height: 0, marginTop: -1,
-    borderLeftWidth: 10, borderRightWidth: 10, borderTopWidth: 12,
-    borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: '#3b86e5',
-    alignSelf: 'center',
+  deviceMenuIcon: {
+    backgroundColor: '#4A90E2', borderRadius: 8, padding: 6, marginRight: 12,
+    width: 32, height: 32, justifyContent: 'center', alignItems: 'center',
   },
+  deviceMenuName: { fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 2 },
+  deviceMenuPorts: { fontSize: 12, color: '#6B7280' },
 
-  fabContainer: { position: 'absolute', right: 20, bottom: 20, alignItems: 'center' },
-  fabMenuItem: { position: 'absolute', alignItems: 'center' },
-  fabIcon: { width: 20, height: 20, resizeMode: 'contain' },
-  fabButton: {
-    width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center',
-    elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84,
+  drawerHeader: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8, flexDirection: 'row', alignItems: 'center' },
+  drawerBadge: { width: 28, height: 28, borderRadius: 8, backgroundColor:'#4A90E2', alignItems:'center', justifyContent:'center', marginRight: 8 },
+  drawerTitle: { fontSize: 16, fontWeight: '800', color: '#111827' },
+
+  deviceHeader: { fontSize: 18, fontWeight: '800', color: '#111827' },
+  deviceSub: { fontSize: 12, color: '#6B7280', marginTop: 2, marginBottom: 10 },
+
+  portCard: {
+    backgroundColor: '#fff', borderRadius: 16, padding: 14,
+    shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 }, elevation: 3,
   },
-  mainFabButton: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#dc3545' },
-  navigationButton: { backgroundColor: 'red' },
-  sosButton: { backgroundColor: '#dc3545' },
-  lockButton: { backgroundColor: 'red' },
+  portTitle: { fontSize: 15, fontWeight: '800', color: '#111827', marginBottom: 8 },
 
-  headerMenuOverlay: { position: 'absolute', top: 70, left: 0, right: 0, bottom: 0, zIndex: 1000 },
-  headerMenuOverlayTouchable: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
-  headerMenu: {
-    position: 'absolute', left: 0, top: 0, width: screenWidth * 0.7, bottom: 0, backgroundColor: 'white',
-    elevation: 10, shadowColor: '#000', shadowOffset: { width: 2, height: 0 }, shadowOpacity: 0.25, shadowRadius: 3.84,
+  portStatusWrap: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
+  portIconWrap: { width: 50, height: 50, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  portIcon: { width: 40, height: 40 },
+
+  portStatusLabel: { fontSize: 12, color: '#6B7280' },
+  portStatusValue: { fontSize: 14, fontWeight: '800' },
+
+  row: {
+    flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6,
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#EEE',
   },
-  headerMenuContent: { flex: 1, paddingTop: 20 },
-  vehicleMenuItem: {
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#f8f8f8', borderWidth: 2, borderColor: '#4A90E2', borderRadius: 8,
-    marginHorizontal: 15, marginVertical: 3, backgroundColor: '#f8f9fa',
-  },
-  vehicleMenuIcon: { backgroundColor: '#4A90E2', borderRadius: 6, padding: 6, marginRight: 12, width: 32, height: 32, justifyContent: 'center', alignItems: 'center' },
-  vehicleMenuImage: { width: 16, height: 16, resizeMode: 'contain' },
-  vehicleMenuDetails: { flex: 1 },
-  vehicleMenuPlate: { fontSize: 14, fontWeight: '600', color: '#333', marginBottom: 2 },
-  vehicleMenuDriver: { fontSize: 12, color: '#666', marginBottom: 2 },
-  vehicleMenuExpiry: { fontSize: 12, color: '#666' },
-  vehicleMenuExpired: { fontSize: 12, color: '#C62828', fontWeight: '600' },
+  kv: { fontSize: 13, color: '#6B7280' },
+  v: { fontSize: 13, color: '#111827', fontWeight: '600' },
 
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' },
-  sosModal: {
-    position: 'absolute', left: 20, right: 20, bottom: 100, backgroundColor: 'white',
-    borderRadius: 15, padding: 20, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.25, shadowRadius: 3.84,
-  },
-  sosHeader: { alignItems: 'center', marginBottom: 20 },
-  sosTitle: { fontSize: 20, fontWeight: '600', color: '#4A90E2' },
-  sosContent: { marginBottom: 20 },
-  sosMessage: { fontSize: 14, color: '#333', lineHeight: 20, marginBottom: 15 },
-  sosButtons: { gap: 10 },
-  sosActivateButton: { backgroundColor: '#dc3545', borderRadius: 25, paddingVertical: 12, alignItems: 'center' },
-  sosActivateText: { color: 'white', fontSize: 16, fontWeight: '500' },
-  sosExitButton: { backgroundColor: '#4A90E2', borderRadius: 25, paddingVertical: 12, alignItems: 'center' },
-  sosExitText: { color: 'white', fontSize: 16, fontWeight: '500' },
-  sosCloseButton: { backgroundColor: '#f8f9fa', borderRadius: 25, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: '#ddd' },
-  sosCloseText: { color: '#666', fontSize: 16 },
-
-  findVehicleModal: {
-    position: 'absolute', left: 50, right: 50, top: '35%', backgroundColor: 'white', borderRadius: 15, padding: 20,
-    elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: -2 }, shadowOpacity: 0.25, shadowRadius: 3.84,
-  },
-  findVehicleHeader: { alignItems: 'center', marginBottom: 20 },
-  findVehicleTitle: { fontSize: 20, fontWeight: '600', color: '#4A90E2' },
-  findVehicleContent: { marginBottom: 20 },
-  findVehicleMessage: { fontSize: 16, color: '#333', lineHeight: 24, textAlign: 'center' },
-  findVehicleButtons: { flexDirection: 'row', gap: 10 },
-  findVehicleCloseButton: { flex: 1, backgroundColor: '#f8f9fa', borderRadius: 25, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: '#ddd' },
-  findVehicleCloseText: { color: '#666', fontSize: 16 },
-  findVehicleConfirmButton: { flex: 1, backgroundColor: '#00BFFF', borderRadius: 25, paddingVertical: 12, alignItems: 'center' },
-  findVehicleConfirmText: { color: 'white', fontSize: 16, fontWeight: '500' },
-
-  expiredTitle: { fontSize: 18, fontWeight: '500', color: '#000', marginBottom: 15, textAlign: 'center' },
-
-  badge: {
-    position: 'absolute', top: -6, right: -6, backgroundColor: '#E53935', borderRadius: 10,
-    minWidth: 18, height: 18, paddingHorizontal: 3, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff',
-  },
-  badgeText: { color: '#fff', fontSize: 11, fontWeight: '700', textAlign: 'center' },
-
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+  // CENTER MODAL STYLES
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 9999,
+    padding: 20,
   },
-});
+  modalContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    width: '100%',
+    maxWidth: 450,
+    maxHeight: '85%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  modalHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
+  modalIconBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#4A90E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  modalCloseBtn: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  modalContent: {
+    padding: 20,
+  },
+  modalInfoCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  modalInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E7EB',
+  },
+  modalInfoKey: {
+    fontSize: 14,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  modalInfoValue: {
+    fontSize: 14,
+    color: '#111827',
+    fontWeight: '700',
+  },
 
-export default MonitoringScreen;
+  // QR area
+  qrWrap: { alignItems: 'center', marginTop: 5 },
+  qrBox: {
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+  },
+  qrHint: { marginTop: 2, fontSize: 12, color: '#6B7280', textAlign:'center' },
+
+  modalActions: { flexDirection: 'row', marginTop: 14 },
+
+  btnPrimary: {
+    backgroundColor: '#2563EB',
+    borderRadius: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnPrimaryText: { color: '#fff', fontWeight: '800' },
+
+  btnGhost: {
+    borderWidth: 1, borderColor: '#2563EB', borderRadius: 12,
+    paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center'
+  },
+  btnGhostText: { color: '#2563EB', fontWeight: '800' },
+});

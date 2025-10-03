@@ -1,21 +1,20 @@
 // cấu hình de build 2 app cung luc file apk tren anhdroid dùng ./gradlew assembleRelease rồi adb install -r app/build/outputs/apk/release/app-universal-release.apk
 // cách build anhdroid
 // Bước 1 : cd android
-//Bước 2: ./gradlew assembleRelease
+// Bước 2: ./gradlew assembleRelease
 // Bước 3: adb install -r app/build/outputs/apk/release/app
 
-
-//debug
-//npx react-native start --reset-cache
-//cd android -> .\gradlew clean
+// debug
+// npx react-native start --reset-cache
+// cd android -> .\gradlew clean
 // cd.. -> npx react-native run-android
-
 
 plugins {
     id "com.android.application"
     id "org.jetbrains.kotlin.android"
     id "com.facebook.react"
-    id "com.google.gms.google-services"
+    // ❌ Nếu không dùng Firebase thì comment lại plugin này
+    // id "com.google.gms.google-services"
 }
 
 react {
@@ -26,13 +25,13 @@ def enableProguardInReleaseBuilds = false
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 android {
-    namespace "com.visacoop"
+    namespace "com.ikycharging"
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdkVersion rootProject.ext.compileSdkVersion
 
     defaultConfig {
-        applicationId "com.visacoop" 
+        applicationId "com.ikycharging"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -62,7 +61,7 @@ android {
 
     buildTypes {
         debug {
-            // ❌ Bỏ applicationIdSuffix để debug và release cùng tên com.visacoop
+            // ❌ Không dùng applicationIdSuffix để tránh lệch package name
             // applicationIdSuffix ".debug"
             versionNameSuffix "-debug"
             debuggable true
@@ -76,7 +75,7 @@ android {
         }
     }
 
-    // Tách ABI để build universal APK
+    // Build universal APK
     splits {
         abi {
             enable true
@@ -90,14 +89,6 @@ android {
         includeInApk false
         includeInBundle false
     }
-
-    // Nếu debug không cần FCM, có thể tắt task Google Services (optional)
-    // Nếu muốn test FCM trên debug, xoá block này đi
-    // afterEvaluate {
-    //     tasks.matching { it.name =~ /processDebugGoogleServices|mergeDebugGoogleServices/ }.all {
-    //         enabled = false
-    //     }
-    // }
 }
 
 configurations.all {
@@ -111,8 +102,12 @@ dependencies {
     implementation("com.facebook.react:react-android")
     implementation("androidx.core:core:1.12.0")
     implementation("androidx.core:core-ktx:1.12.0")
+
+    // Giữ lại nếu dùng location
     implementation("com.google.android.gms:play-services-location:20.0.0")
-    implementation("com.google.firebase:firebase-messaging:23.4.0")
+
+    // ❌ Comment nếu chưa dùng FCM
+    // implementation("com.google.firebase:firebase-messaging:23.4.0")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

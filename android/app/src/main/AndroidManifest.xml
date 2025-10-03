@@ -1,6 +1,7 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Quyền cơ bản -->
+    <!-- ===== QUYỀN CƠ BẢN ===== -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -8,13 +9,15 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+                 android:maxSdkVersion="28" />
+<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
-    
-
-    <!-- Nếu cần thì mở -->
+    <!-- Nếu cần chạy nền location thì bật -->
     <!-- <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" /> -->
 
-    <!-- Location features -->
+    <!-- ===== LOCATION FEATURES ===== -->
     <uses-feature
         android:name="android.hardware.location"
         android:required="false" />
@@ -25,16 +28,16 @@
         android:name="android.hardware.location.network"
         android:required="false" />
 
+    <!-- ===== APPLICATION ===== -->
     <application
         android:name=".MainApplication"
         android:label="@string/app_name"
-        android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:icon="@mipmap/ic_launcher_monochrome"
         android:theme="@style/AppTheme"
         android:supportsRtl="true"
         android:allowBackup="false">
 
-        <!-- Google Maps API key -->
+        <!-- ===== GOOGLE MAPS ===== -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyC2QEug8UyrZkNMHRI-xz-bQ18Afri6KHU" />
@@ -43,7 +46,35 @@
             android:name="com.google.android.gms.version"
             android:value="@integer/google_play_services_version" />
 
-        <!-- Main Activity -->
+        <!-- ===== CHẶN AUTO-INIT FIREBASE (ép ghi đè giá trị) ===== -->
+        <meta-data
+            android:name="firebase_data_collection_default_enabled"
+            android:value="false"
+            tools:replace="android:value" />
+
+        <meta-data
+            android:name="firebase_analytics_collection_enabled"
+            android:value="false"
+            tools:replace="android:value" />
+
+        <meta-data
+            android:name="firebase_crashlytics_collection_enabled"
+            android:value="false"
+            tools:replace="android:value" />
+
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false"
+            tools:replace="android:value" />
+
+        <!-- 🪓 Bỏ provider FirebaseInitProvider nếu có -->
+        <provider
+            android:name="com.google.firebase.provider.FirebaseInitProvider"
+            android:authorities="${applicationId}.firebaseinitprovider"
+            android:exported="false"
+            tools:node="remove" />
+
+        <!-- ===== MAIN ACTIVITY ===== -->
         <activity
             android:name=".MainActivity"
             android:label="@string/app_name"
@@ -51,7 +82,6 @@
             android:launchMode="singleTask"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustPan|stateHidden"
-             
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -59,7 +89,8 @@
             </intent-filter>
         </activity>
 
-        <!-- PushNotification service -->
+        <!-- ===== NOTIFICATION SERVICE (GỠ NẾU CHƯA DÙNG) ===== -->
+        <!-- Nếu app chưa bật react-native-push-notification hoặc FCM, xóa block này để tránh crash -->
         <service
             android:name="com.dieam.reactnativepushnotification.modules.RNPushNotificationListenerService"
             android:exported="true">

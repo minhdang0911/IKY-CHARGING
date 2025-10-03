@@ -1,299 +1,376 @@
-// screens/Home/OrderDetail.jsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  BackHandler,
+  Platform,
+  PanResponder,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const LANG_KEY = 'app_language';
 
+// ========= i18n =========
 const STRINGS = {
   vi: {
     headerTitle: 'Chi tiết đơn hàng',
-    createdAt: 'Ngày tạo',
-    sectionOrderInfo: 'Chi tiết đơn hàng',
-    orderCode: 'Mã đơn hàng',
-    package: 'Gói dịch vụ',
-    duration: 'Thời gian',
-    months: 'Tháng',
-    price: 'Giá tiền',
+    sectionOrder: 'Tổng quan đơn hàng',
+    sectionAgent: 'Thông tin đại lý',
+    sectionDevice: 'Thông tin thiết bị',
+    sectionHistory: 'Lịch sử trạng thái',
+    orderId: 'Mã đơn hàng',
     status: 'Trạng thái',
-    status_activated: 'Kích hoạt',
-    status_pending: 'Chờ duyệt',
-    status_cancelled: 'Đã hủy',
-    status_unknown: 'Không rõ',
+    amount: 'Số tiền',
+    paidAt: 'Thanh toán lúc',
+    createdAt: 'Ngày tạo',
+    method: 'Phương thức thanh toán',
+    port: 'Cổng sạc',
     close: 'Đóng',
   },
   en: {
     headerTitle: 'Order Detail',
-    createdAt: 'Created at',
-    sectionOrderInfo: 'Order Information',
-    orderCode: 'Order Code',
-    package: 'Package',
-    duration: 'Duration',
-    months: 'Months',
-    price: 'Price',
+    sectionOrder: 'Order Overview',
+    sectionAgent: 'Agent Information',
+    sectionDevice: 'Device Information',
+    sectionHistory: 'Order History',
+    orderId: 'Order ID',
     status: 'Status',
-    status_activated: 'Activated',
-    status_pending: 'Pending',
-    status_cancelled: 'Cancelled',
-    status_unknown: 'Unknown',
+    amount: 'Amount',
+    paidAt: 'Paid At',
+    createdAt: 'Created At',
+    method: 'Payment Method',
+    port: 'Port',
     close: 'Close',
   },
 };
 
-const formatVND = (n) =>
-  Number(n || 0).toLocaleString('vi-VN', { maximumFractionDigits: 0 }) + ' VNĐ';
+// format tiền tệ
+const fmtMoney = (n) =>
+  Number(n || 0).toLocaleString('vi-VN', { maximumFractionDigits: 0 }) + 'đ';
 
-const formatDateTime = (iso) => {
+const fmtDate = (iso) => {
+  if (!iso) return '—';
   try {
     const d = new Date(iso);
-    if (isNaN(d.getTime())) return '—';
-    const dd = d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const tt = d.toLocaleTimeString('vi-VN', { hour12: false });
-    return `${dd} ${tt}`;
-  } catch { return '—'; }
-};
-
-const statusText = (st, t) => {
-  switch (Number(st)) {
-    case 1:  return t('status_activated');
-    case 3:  return t('status_pending');
-    case 0:  return t('status_cancelled');
-    default: return t('status_unknown');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return `${dd}/${mm}/${yyyy} ${hh}:${mi}`;
+  } catch {
+    return '—';
   }
 };
 
-// chấm màu nhỏ, còn lại trung tính
-const tinyDotColor = (st) => {
-  switch (Number(st)) {
-    case 1:  return '#16a34a'; // xanh nhưng rất nhỏ 
-    case 3:  return '#d97706'; // cam nhỏ
-    case 0:  return '#dc2626'; // đỏ nhỏ
-    default: return '#6b7280'; // xám
-  }
+// màu trạng thái
+const STATUS_COLOR = {
+  pending: '#f59e0b',
+  paid: '#2563eb',
+  completed: '#16a34a',
+  canceled: '#ef4444',
+  failed: '#ef4444',
+  default: '#6b7280',
 };
 
-export default function OrderDetail({ order, navigateToScreen, device }) {
-  const [language, setLanguage] = useState('vi');
-  const t = (k) => (STRINGS[language]?.[k] ?? k);
+// dịch trạng thái
+function viStatus(s) {
+  const x = String(s || '').toLowerCase();
+  switch (x) {
+    case 'pending': return 'Đang xử lý';
+    case 'paid': return 'Hoàn thành';
+    case 'completed': return 'Hoàn tất';
+    case 'canceled': return 'Đã hủy';
+    case 'failed': return 'Thất bại';
+    default: return 'Không rõ';
+  }
+}
+
+export default function OrderDetail({ order, navigateToScreen }) {
+  const [lang, setLang] = useState('vi');
+  const navigatingRef = useRef(false);
+
+  const t = (k) => STRINGS[lang]?.[k] || k;
 
   useEffect(() => {
     (async () => {
       try {
         const saved = await AsyncStorage.getItem(LANG_KEY);
-        if (saved) setLanguage(saved);
+        if (saved) setLang(saved);
       } catch {}
     })();
   }, []);
 
-  // `order` là _raw từ HistoryExtend (code, name, time, price, status, created_at)
-  const shaped = useMemo(() => {
-    if (!order) return {};
-    return {
-      orderCode : order.code ?? '',
-      pkgName   : order.name ?? '',
-      duration  : order.time ? `${order.time} ${t('months')}` : '—',
-      priceText : formatVND(order.price),
-      createdAt : formatDateTime(order.created_at),
-      status    : statusText(order.status, t),
-      _status   : order.status,
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order, language]);
+  const goBack = () => {
+    if (navigatingRef.current) return;
+    navigatingRef.current = true;
+    try {
+      navigateToScreen?.('historyExtend');
+    } finally {
+      // nhỏ delay để tránh double-trigger khi vừa gesture vừa nút
+      setTimeout(() => { navigatingRef.current = false; }, 300);
+    }
+  };
 
-  const handleBackPress = () => navigateToScreen('historyExtend', { device });
+  // ANDROID: back cứng → chỉ back trang, không thoát app
+  useEffect(() => {
+    const onHWBack = () => {
+      goBack();
+      return true; // chặn default (không đóng app)
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onHWBack);
+    return () => sub.remove();
+  }, []);
+
+  // iOS: edge-swipe (tự chế nhẹ) để back nếu m không dùng React Navigation gesture
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: (e, g) => {
+        // chỉ bắt gesture khi bắt đầu từ mép trái
+        return Platform.OS === 'ios' && g.x0 <= 20;
+      },
+      onMoveShouldSetPanResponder: (e, g) => {
+        // kéo ngang phải đủ
+        return Platform.OS === 'ios' && g.dx > 10 && Math.abs(g.dy) < 20;
+      },
+      onPanResponderMove: () => {},
+      onPanResponderRelease: (e, g) => {
+        // nếu kéo sang phải đủ xa thì back
+        if (Platform.OS === 'ios' && g.dx > 60) {
+          goBack();
+        }
+      },
+    })
+  ).current;
+
+  if (!order) {
+    return (
+      <View style={styles.center}>
+        <Text>Không có dữ liệu đơn hàng</Text>
+      </View>
+    );
+  }
+
+  const color = STATUS_COLOR[order?.status] || STATUS_COLOR.default;
 
   return (
-    <View style={styles.container}>
-      {/* Header GIỮ NGUYÊN */}
+    <View style={styles.container} {...(Platform.OS === 'ios' ? panResponder.panHandlers : {})}>
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
-          <Icon name="arrow-back" size={24} color="white" />
+        <TouchableOpacity style={styles.backButton} onPress={goBack}>
+          <Icon name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('headerTitle')}</Text>
-        <TouchableOpacity style={styles.notificationButton}>
-          <Icon name="notifications" size={24} color="white" />
-        </TouchableOpacity>
+        <View style={{ width: 24 }} />
       </View>
 
-      {/* Content mới: tối giản, hiện đại */}
-      <ScrollView
-        style={styles.content}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        {/* Card tổng quan tinh gọn */}
+      <ScrollView style={styles.content} contentContainerStyle={{ paddingBottom: 24 }}>
+        {/* Tổng quan đơn hàng */}
         <View style={styles.card}>
-          <View style={styles.summaryTop}>
-            <View style={styles.summaryLeft}>
-              <Text style={styles.summaryTitle}>{t('sectionOrderInfo')}</Text>
-              <Text style={styles.metaText}>
-                {t('createdAt')}: <Text style={styles.metaStrong}>{shaped.createdAt || '—'}</Text>
-              </Text>
-            </View>
+          <SectionHeader icon="receipt" title={t('sectionOrder')} />
+          <InfoRow icon="confirmation-number" label={t('orderId')} value={order?.orderId} />
+          <Divider />
 
-            <View style={styles.statusWrap}>
-              <View style={[styles.dot, { backgroundColor: tinyDotColor(order?.status) }]} />
-              <Text style={styles.statusText} numberOfLines={1}>
-                {shaped.status || '—'}
-              </Text>
-            </View>
-          </View>
+          <StatusRow label={t('status')} value={viStatus(order?.status)} color={color} />
+          <Divider />
 
-          <View style={styles.amountBlock}>
-            <Text style={styles.amountLabel}>{t('price')}</Text>
-            <Text style={styles.amountValue}>{shaped.priceText || '—'}</Text>
-          </View>
+          <InfoRow icon="payments" label={t('amount')} value={fmtMoney(order?.amount)} />
+          <Divider />
+
+          <InfoRow icon="account-balance-wallet" label={t('method')} value={String(order?.payment_method).toUpperCase()} />
+          <Divider />
+
+          <InfoRow icon="power" label={t('port')} value={String(order?.portNumber)} />
+          <Divider />
+
+          <InfoRow icon="event" label={t('createdAt')} value={fmtDate(order?.createdAt)} />
+          <Divider />
+
+          <InfoRow icon="check-circle" label={t('paidAt')} value={fmtDate(order?.paidAt)} />
         </View>
 
-        {/* Info list tối giản */}
+        {/* Đại lý */}
         <View style={styles.card}>
-          <InfoRow label={t('orderCode')} value={shaped.orderCode} mono />
+          <SectionHeader icon="store" title={t('sectionAgent')} />
+          <InfoRow icon="person" label="Tên đại lý" value={order?.agent_id?.name} />
           <Divider />
-          <InfoRow label={t('package')} value={shaped.pkgName} />
+          <InfoRow icon="place" label="Địa chỉ" value={order?.agent_id?.address} />
           <Divider />
-          <InfoRow label={t('duration')} value={shaped.duration} />
+          <InfoRow icon="phone" label="Điện thoại" value={order?.agent_id?.phone} />
           <Divider />
-          <InfoRow label={t('status')} value={shaped.status} withBadge badgeDotColor={tinyDotColor(order?.status)} />
+          <InfoRow icon="email" label="Email" value={order?.agent_id?.email} />
         </View>
 
-        {/* Nút đóng — trung tính */}
-        <TouchableOpacity style={styles.closeBtn} onPress={handleBackPress} activeOpacity={0.8}>
+        {/* Thiết bị */}
+        <View style={styles.card}>
+          <SectionHeader icon="devices" title={t('sectionDevice')} />
+          <InfoRow icon="memory" label="Tên thiết bị" value={order?.device_id?.name} />
+          <Divider />
+          {/* <InfoRow icon="qr-code" label="Mã thiết bị" value={order?.device_id?.device_code} /> */}
+          <Divider />
+          <InfoRow icon="bolt" label="Điện áp" value={`${order?.device_id?.voltage || 0} V`} />
+          <Divider />
+          <InfoRow icon="device-thermostat" label="Nhiệt độ" value={`${order?.device_id?.temperature || 0} °C`} />
+          <Divider />
+          <InfoRow icon="system-update" label="Firmware" value={order?.device_id?.fw_version} />
+        </View>
+
+        {/* Lịch sử trạng thái */}
+        <View style={styles.card}>
+          <SectionHeader icon="history" title={t('sectionHistory')} />
+          {(order?.history || []).map((h, idx) => {
+            const hColor = STATUS_COLOR[h.status] || STATUS_COLOR.default;
+            return (
+              <View key={idx} style={styles.historyRow}>
+                <View style={[styles.historyDot, { backgroundColor: hColor }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.historyStatus}>{viStatus(h.status)}</Text>
+                  <Text style={styles.historyNote}>{h.note}</Text>
+                  <Text style={styles.historyTime}>{fmtDate(h.timestamp)}</Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+
+        {/* Nút đóng */}
+        <TouchableOpacity style={styles.closeBtn} onPress={goBack} activeOpacity={0.85}>
           <Text style={styles.closeBtnText}>{t('close')}</Text>
         </TouchableOpacity>
-
-        <View style={{ height: 16 }} />
       </ScrollView>
     </View>
   );
 }
 
-/* --- small presentational helpers (tối giản) --- */
+// ========== Component phụ ==========
+const SectionHeader = ({ icon, title }) => (
+  <View style={styles.sectionHeader}>
+    <Icon name={icon} size={18} color="#2563eb" style={{ marginRight: 8 }} />
+    <Text style={styles.sectionTitle}>{title}</Text>
+  </View>
+);
+
+const InfoRow = ({ icon, label, value }) => (
+  <View style={styles.row}>
+    <View style={styles.rowLeft}>
+      <Icon name={icon} size={18} color="#64748b" style={{ marginRight: 6 }} />
+      <Text style={styles.label}>{label}</Text>
+    </View>
+    <Text style={styles.value} numberOfLines={2}>
+      {value || '—'}
+    </Text>
+  </View>
+);
+
+const StatusRow = ({ label, value, color }) => (
+  <View style={styles.row}>
+    <View style={styles.rowLeft}>
+      <Icon name="info" size={18} color={color} style={{ marginRight: 6 }} />
+      <Text style={[styles.label, { color }]}>{label}</Text>
+    </View>
+    <View style={[styles.statusBadge, { borderColor: color }]}>
+      <View style={[styles.dot, { backgroundColor: color }]} />
+      <Text style={[styles.statusText, { color }]}>{value}</Text>
+    </View>
+  </View>
+);
+
 const Divider = () => <View style={styles.divider} />;
 
-const InfoRow = ({ label, value, mono, withBadge, badgeDotColor }) => {
-  return (
-    <View style={styles.row}>
-      <Text style={styles.label}>{label}</Text>
-      {withBadge ? (
-        <View style={styles.badge}>
-          <View style={[styles.badgeDot, { backgroundColor: badgeDotColor || '#6b7280' }]} />
-          <Text style={styles.badgeText} numberOfLines={1}>{value || '—'}</Text>
-        </View>
-      ) : (
-        <Text
-          style={[styles.value, mono && styles.mono]}
-          numberOfLines={1}
-        >
-          {value || '—'}
-        </Text>
-      )}
-    </View>
-  );
-};
-
-/* --- styles: palette xám – trắng, nhấn rất nhẹ --- */
+// ========== Styles ==========
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f4f6f8' },
+  container: { flex: 1, backgroundColor: '#F6F7FB' },
 
-  // Header GIỮ NGUYÊN
   header: {
     backgroundColor: '#4A90E2',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    paddingTop: 45,
+    paddingHorizontal: 16,
+    paddingTop: 25,
+    paddingBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
   },
-  backButton: { padding: 4, marginRight: 8 },
-  headerTitle: { color: 'white', fontSize: 18, fontWeight: '500', flex: 1 },
-  notificationButton: { padding: 4 },
+  backButton: { padding: 6, marginRight: 6 },
+  headerTitle: { flex: 1, color: '#fff', fontSize: 18, fontWeight: '700' },
 
-  // Content
-  content: { flex: 1 },
-  scrollContent: { padding: 16, paddingBottom: 32 },
+  content: { flex: 1, padding: 16 },
 
-  // Card nền trắng, bóng nhẹ, bo mềm
   card: {
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 14,
-    marginBottom: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e5e7eb',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
     shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 1,
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
 
-  // Summary block
-  summaryTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  summaryLeft: { flex: 1, paddingRight: 8 },
-  summaryTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  metaText: { fontSize: 12, color: '#6b7280', marginTop: 4 },
-  metaStrong: { color: '#374151', fontWeight: '600' },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  sectionTitle: { fontSize: 15, fontWeight: '800', color: '#111827' },
 
-  statusWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: '#f3f4f6',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e5e7eb',
-  },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  statusText: { fontSize: 12, color: '#111827', fontWeight: '600' },
-
-  amountBlock: { marginTop: 12 },
-  amountLabel: { fontSize: 12, color: '#6b7280' },
-  amountValue: { fontSize: 22, color: '#111827', fontWeight: '800', marginTop: 4 },
-
-  // Rows
   row: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
     justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 6,
   },
-  label: { fontSize: 14, color: '#374151', fontWeight: '600', marginRight: 12 },
-  value: { fontSize: 14, color: '#111827', fontWeight: '700', flexShrink: 1, textAlign: 'right' },
-  mono: { fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }) },
+  rowLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
 
-  badge: {
+  label: { fontSize: 14, color: '#374151', fontWeight: '600' },
+  value: {
+    fontSize: 14,
+    color: '#111827',
+    fontWeight: '500',
+    maxWidth: '55%',
+    textAlign: 'right',
+  },
+
+  divider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 4 },
+
+  statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#f9fafb',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#e5e7eb',
+    borderWidth: 1,
+    backgroundColor: '#f8fafc',
   },
-  badgeDot: { width: 6, height: 6, borderRadius: 3 },
-  badgeText: { fontSize: 13, color: '#111827', fontWeight: '700' },
+  dot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
+  statusText: { fontSize: 13, fontWeight: '700' },
 
-  divider: { height: 1, backgroundColor: '#f1f5f9' },
-
-  // Close button: trung tính xám đậm
-  closeBtn: {
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  historyDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     marginTop: 6,
-    backgroundColor: '#111827',
-    height: 46,
+    marginRight: 10,
+  },
+  historyStatus: { fontSize: 14, fontWeight: '700', color: '#111827' },
+  historyNote: { fontSize: 13, color: '#475569', marginTop: 2 },
+  historyTime: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
+
+  closeBtn: {
+    backgroundColor: '#2563eb',
+    height: 48,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 8,
   },
   closeBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 });

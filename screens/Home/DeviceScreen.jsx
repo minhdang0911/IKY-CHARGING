@@ -1,673 +1,467 @@
-// screens/Home/DeviceList.jsx
+// screens/.../DeviceList.jsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, Image,
-  Modal, TextInput, RefreshControl,
+  View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput,
+  RefreshControl, Platform,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getDevice, getVehicleCategories, buildVehicleCategoryMap, getExtendHistory } from '../../apis/devices';
+import { getDevices, getExtendHistory } from '../../apis/devices';
 import { showMessage } from '../../components/Toast/Toast';
-import { login as loginApi } from '../../apis/auth';
-import logoGPS from '../../assets/img/ic_gps_2-removebg-preview.png';
-import iconsGpsExpires from '../../assets/img/ic_gps_1.png';
+import PortCardSkeleton from '../../components/Skeletons/PortCardSkeleton';  
 
-const K_DEVICES = 'devices_cache_v1';
-const K_VEH_CATS = 'vehicle_cats_cache_v1';
 const LANG_KEY = 'app_language';
+const K_DEVICES = 'ev_devices_cache_v1';
+const K_HISTORY_PREF = 'EV_HISTORY_PREF';
 
 const STRINGS = {
   vi: {
-    header: 'Danh sách thiết bị',
-    searchPH: 'Tìm theo biển số, SĐT...',
-    vehiclePlate: 'Biển số xe',
-    driver: 'Lái xe',
-    vehicleType: 'Loại xe',
-    devicePhone: 'SĐT thiết bị',
-    activedDate: 'Ngày kích hoạt',
-    expiredDate: 'Ngày hết hạn',
-    isExpired: 'Hết hạn sử dụng',
-    extend: 'Gia hạn',
-    addDevice: 'Thêm thiết bị',
-    edit: 'Sửa',
-    call: 'Gọi',
-    settings: 'Thiết lập',
-    empty: 'Chưa có thiết bị nào.',
-    // modal
-    modalTitle: 'Thay đổi thông tin',
-    modalPH: 'Mật khẩu xác nhận',
-    close: 'Đóng',
-    agree: 'Đồng ý',
-    checking: 'Đang kiểm tra...',
-    // messages
-    enterConfirmPwd: 'Vui lòng nhập mật khẩu xác nhận',
-    missingUsername: 'Thiếu username. Vui lòng đăng nhập lại.',
-    wrongPwd: 'Mật khẩu không đúng',
-    missingToken: 'Thiếu access token. Vui lòng đăng nhập lại.',
-    loadFail: 'Tải danh sách thiết bị thất bại',
-    // fallback
-    unknownType: 'Chưa xác định',
+    header: 'Thiết bị sạc',
+    searchPH: 'Tìm theo mã / tên / vị trí…',
+    filters: { all:'Tất cả', online:'Online', offline:'Offline' },
+    ports: 'Số cổng',
+    lastHb: 'Hoạt động gần nhất',
+    fw: 'FW',
+    monitor: 'Giám sát',
+    details: 'Chi tiết',
+    settings: 'Cài đặt',
+    history: 'Lịch sử',
+    empty: 'Không có thiết bị nào',
+    createOrder: 'Tạo đơn',
+    offlineHint: 'Thiết bị đang offline, không thể tạo đơn.',
+    deviceCode: 'Mã thiết bị',
+    voltage: 'Điện áp',
+    temp: 'Nhiệt độ',
   },
   en: {
-    header: 'Devices',
-    searchPH: 'Search by plate, phone...',
-    vehiclePlate: 'Plate',
-    driver: 'Driver',
-    vehicleType: 'Vehicle type',
-    devicePhone: 'Device phone',
-    activedDate: 'Activated on',
-    expiredDate: 'Expiry date',
-    isExpired: 'Expired on',
-    extend: 'Extend',
-    addDevice: 'Add device',
-    edit: 'Edit',
-    call: 'Call',
+    header: 'Chargers',
+    searchPH: 'Search by code / name / location…',
+    filters: { all:'All', online:'Online', offline:'Offline', charging:'Charging', fault:'Fault' },
+    ports: 'Ports',
+    lastHb: 'Last heartbeat',
+    fw: 'FW',
+    monitor: 'Monitor',
+    details: 'Details',
     settings: 'Settings',
-    empty: 'No devices yet.',
-    // modal
-    modalTitle: 'Change information',
-    modalPH: 'Confirmation password',
-    close: 'Close',
-    agree: 'Confirm',
-    checking: 'Checking...',
-    // messages
-    enterConfirmPwd: 'Please enter the confirmation password',
-    missingUsername: 'Missing username. Please sign in again.',
-    wrongPwd: 'Incorrect password',
-    missingToken: 'Missing access token. Please sign in again.',
-    loadFail: 'Failed to load devices',
-    // fallback
-    unknownType: 'Unknown',
+    history: 'History',
+    empty: 'No devices',
+    createOrder: 'Create order',
+    offlineHint: 'Device is offline. Cannot create order.',
+    deviceCode: 'Device code',
+    voltage: 'Voltage',
+    temp: 'Temp',
   },
 };
 
-const formatPhone = (p) => {
-  if (!p) return '—';
-  const s = String(p).trim();
-  if (s.length === 10 && s[0] !== '0') return '0' + s;
-  return s;
+const STATUS_COLOR = {
+  online: '#22C55E',
+  available: '#22C55E',
+  offline: '#EF4444',
+  charging: '#3B82F6',
+  busy: '#3B82F6',
+  fault: '#F59E0B',
+  idle: '#64748B',
 };
 
-const DeviceList = ({ navigateToScreen }) => {
-  const isMountedRef = useRef(true);
-  const [language, setLanguage] = useState('vi');
-  const [rawDevices, setRawDevices] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
+// ---- sanitize sensors
+const saneTemp = (t) => {
+  const n = Number(t);
+  if (!Number.isFinite(n)) return null;
+  if (n < -40 || n > 125) return null;
+  return Math.round(n);
+};
+
+export default function DeviceList({ navigateToScreen }) {
+  const mounted = useRef(true);
+  const [lang, setLang] = useState('vi');
+  const t = useCallback((k) => STRINGS[lang]?.[k] || k, [lang]);
+
+  const [raw, setRaw] = useState([]); // full list từ API
   const [query, setQuery] = useState('');
-  // modal password
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [checking, setChecking] = useState(false);
-  // pull-to-refresh
+  const [filter, setFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
-  const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
-  
-  const t = useCallback((k) => STRINGS[language][k] || k, [language]);
-  const locale = language === 'en' ? 'en-US' : 'vi-VN';
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-    };
-  }, []);
+  // 👇 NEW: loading lần đầu để show skeleton
+  const [loading, setLoading] = useState(true);
 
-  // Load language - chỉ chạy một lần
-  useEffect(() => {
-    let mounted = true;
-    
-    const loadLanguage = async () => {
-      try {
-        const saved = await AsyncStorage.getItem(LANG_KEY);
-        if (mounted && saved) {
-          setLanguage(saved);
-        }
-      } catch (error) {
-        console.log('Error loading language:', error);
-      }
-    };
-    
-    loadLanguage();
-    
-    return () => {
-      mounted = false;
-    };
-  }, []);
+  // Front-end pagination
+  const [page, setPage] = useState(1);
+  const limit = 10;
 
-  const catMap = useMemo(() => buildVehicleCategoryMap(categories), [categories]);
+  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => { (async()=>{ try{ const s=await AsyncStorage.getItem(LANG_KEY); if(s) setLang(s);}catch{} })(); }, []);
 
-  // Load cache - stable function
-  const loadFromCache = useCallback(async () => {
-    if (!isMountedRef.current) return;
-    
+  const loadCache = useCallback(async () => {
     try {
-      const [dStr, cStr] = await Promise.all([
-        AsyncStorage.getItem(K_DEVICES),
-        AsyncStorage.getItem(K_VEH_CATS),
-      ]);
-      
-      if (!isMountedRef.current) return;
-      
-      if (dStr) {
-        const parsed = JSON.parse(dStr);
-        if (Array.isArray(parsed)) {
-          setRawDevices(parsed);
-        }
+      const s = await AsyncStorage.getItem(K_DEVICES);
+      if (!mounted.current) return;
+      if (s) {
+        const arr = JSON.parse(s);
+        if (Array.isArray(arr)) setRaw(arr);
       }
-      if (cStr) {
-        const parsed = JSON.parse(cStr);
-        if (Array.isArray(parsed)) {
-          setCategories(parsed);
-        }
-      }
-    } catch (error) {
-      console.log('Error loading cache:', error);
-    }
+    } catch {}
   }, []);
 
-  // Fetch fresh data - stable function
-  const fetchFresh = useCallback(async (showToastOnError = false) => {
-    if (!isMountedRef.current) return;
-    
+  const fetchList = useCallback(async (toastOnErr=false) => {
     try {
       const token = await AsyncStorage.getItem('access_token');
-      
-      if (!isMountedRef.current) return;
-      
-      if (!token) {
-        if (showToastOnError) {
-          showMessage('Thiếu access token. Vui lòng đăng nhập lại.');
-        }
-        return;
-      }
-
-      const [devicesRes, catsRes] = await Promise.all([
-        getDevice(token),
-        getVehicleCategories(token).catch(() => []),
-      ]);
-
-      if (!isMountedRef.current) return;
-
-      const d = Array.isArray(devicesRes) ? devicesRes : [];
-      const c = Array.isArray(catsRes) ? catsRes : [];
-      
-      setRawDevices(d);
-      setCategories(c);
-
-      // Save to cache
-      await AsyncStorage.setItem(K_DEVICES, JSON.stringify(d));
-      await AsyncStorage.setItem(K_VEH_CATS, JSON.stringify(c));
-      
-    } catch (err) {
-      if (!isMountedRef.current) return;
-      
-      if (showToastOnError) {
-        let msg = err?.message || 'Tải danh sách thiết bị thất bại';
-        try {
-          const parsed = JSON.parse(err.message);
-          msg = parsed?.message || msg;
-        } catch {}
-        showMessage(msg);
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setHasFetchedOnce(true);
-      }
+      if (!token) return;
+      const data = await getDevices(token); // fetch full list
+      const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+      if (!mounted.current) return;
+      setRaw(list);
+      await AsyncStorage.setItem(K_DEVICES, JSON.stringify(list));
+    } catch (e) {
+      if (toastOnErr) showMessage(e?.message || 'Không tải được danh sách');
     }
   }, []);
 
-  // Initial load - chỉ chạy một lần
+  // 👇 chạy boot: load cache (nếu có) + fetch API rồi tắt loading để skeleton biến mất
   useEffect(() => {
-    let mounted = true;
-    
-    const initialLoad = async () => {
-      if (!mounted) return;
-      await loadFromCache();
-      if (!mounted) return;
-      await fetchFresh(false);
-    };
-    
-    initialLoad();
-    
-    return () => {
-      mounted = false;
-    };
-  }, [loadFromCache, fetchFresh]);
+    (async()=>{
+      setLoading(true);
+      await loadCache();        // có cache thì hiện ngay data cũ (skeleton chỉ chớp nhẹ)
+      await fetchList(false);   // gọi API cập nhật
+      if (mounted.current) setLoading(false);
+    })();
+  }, [loadCache, fetchList]);
 
   const onRefresh = useCallback(async () => {
-    if (!isMountedRef.current) return;
-    
     setRefreshing(true);
-    await fetchFresh(true);
-    
-    if (isMountedRef.current) {
-      setRefreshing(false);
-    }
-  }, [fetchFresh]);
+    await fetchList(true);
+    setRefreshing(false);
+  }, [fetchList]);
 
-  const devices = useMemo(() => {
-    return (rawDevices || []).map((d) => {
-      // ngày hết hạn
-      const expiryDateRaw = d?.date_exp || d?.expiry_date;
-      let formattedExpiryDate = '—';
-      let isExpired = false;
-      
-      if (expiryDateRaw) {
-        try {
-          const exp = new Date(expiryDateRaw);
-          if (!isNaN(exp.getTime())) {
-            formattedExpiryDate = exp.toLocaleDateString(locale, { 
-              day: '2-digit', 
-              month: '2-digit', 
-              year: 'numeric' 
-            });
-            const today = new Date();
-            exp.setHours(0,0,0,0);
-            today.setHours(0,0,0,0);
-            isExpired = exp.getTime() < today.getTime();
-          }
-        } catch {}
-      }
+  // Chuẩn hoá data
+ const items = useMemo(() => {
+  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
+  return (raw || []).map((d) => {
+    const ports = Array.isArray(d?.ports) ? d.ports : [];
+    const lastHb = d?.lastHeartbeat ? new Date(d.lastHeartbeat) : null;
+    const _id = d?._id || d?.id || d?.device_id || d?.device_code;
 
-      // ngày kích hoạt
-      const activeDateRaw = d?.date_actived || d?.activated_date || d?.active_date;
-      let formattedActiveDate = '—';
-      if (activeDateRaw) {
-        try {
-          const act = new Date(activeDateRaw);
-          if (!isNaN(act.getTime())) {
-            formattedActiveDate = act.toLocaleDateString(locale, { 
-              day: '2-digit', 
-              month: '2-digit', 
-              year: 'numeric' 
-            });
-          }
-        } catch {}
-      }
+    return {
+      _id,
+      id: _id,
+      code: d?.device_code || '—',
+      name: d?.name || '—',
+      location: d?.location || '',
+      status: (d?.status || '').toLowerCase(),
+      fw: d?.fw_version || '—',
+      ports: ports.map(p => ({ n: p.portNumber, status: (p.status||'').toLowerCase() })),
+      portsCount: ports.length,
+      lastHbStr: (lastHb && !isNaN(lastHb)) ? lastHb.toLocaleString(locale) : '—',
+      voltage: d?.voltage,
+      temp: saneTemp(d?.temperature),
+      createdAt: d?.createdAt ? new Date(d.createdAt) : null,   // 👈 thêm field này
+      raw: d,
+    };
+  })
+  // 👇 sort theo createdAt cũ → mới
+  .sort((a, b) => {
+    const ta = a.createdAt ? a.createdAt.getTime() : 0;
+    const tb = b.createdAt ? b.createdAt.getTime() : 0;
+    return ta - tb;
+  });
+}, [raw, lang]);
 
-      return {
-        id: d?._id || d?.imei || Math.random().toString(36).slice(2),
-        imei: d?.imei || '',
-        vehicleNumber: d?.license_plate || d?.imei || '—',
-        driverNumber: d?.driver || '—',
-        vehicleType: catMap[d?.vehicle_category_id] || 'Chưa xác định',
-        devicePhone: formatPhone(d?.phone_number),
-        expiryDate: formattedExpiryDate,
-        activeDate: formattedActiveDate,
-        isExpired,
-        version: d?.version || '—',
-        raw: d,
-      };
-    });
-  }, [rawDevices, catMap, locale]);
 
-  const filteredDevices = useMemo(() => {
+  // Filter
+  const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return devices;
-    return devices.filter(d =>
-      [
-        d.vehicleNumber || '',
-        d.driverNumber || '',
-        d.devicePhone || '',
-        d.expiryDate || '',
-        d.activeDate || '',
-        d.imei || '',
-        d.vehicleType || '',
-      ].join(' ').toLowerCase().includes(q)
-    );
-  }, [devices, query]);
+    return items.filter((it) => {
+      const hitQ = !q || [it.code, it.name, it.location, it.status, it.fw, it.lastHbStr].join(' ').toLowerCase().includes(q);
+      const hitF = filter === 'all'
+        ? true
+        : (it.status === filter || it.ports.some(p => p.status === filter));
+      return hitQ && hitF;
+    });
+  }, [items, query, filter]);
 
-  const handleAddDevice = () => setShowPasswordModal(true);
-  
-  const handleEditDevice = (deviceRaw) => {
-    navigateToScreen('devicesInfo', { device: deviceRaw });
-  };
-  
-  const handleCallDevice = (deviceRaw) => {
-   navigateToScreen('phoneUser', { device: deviceRaw });
- 
-  };
-  
-  const handleExtendDevice = (deviceRaw) => {
-    navigateToScreen('extend', { from: 'Device', device: deviceRaw });
-  };
+  // Phân trang
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(filtered.length / limit)), [filtered.length]);
+  const pagedData = useMemo(() => {
+    const start = (page - 1) * limit;
+    return filtered.slice(start, start + limit);
+  }, [filtered, page, limit]);
 
-  const handleDeviceSettings = async (deviceRaw) => {
+  const goExtend   = (d) => navigateToScreen('extend', { device: d });
+  const goSettings = async (d) => {
     try {
       const token = await AsyncStorage.getItem('access_token');
-      const raw = await getExtendHistory({ 
-        accessToken: token, 
-        deviceId: deviceRaw?._id || deviceRaw?.id || deviceRaw?.imei 
-      });
-      navigateToScreen('historyExtend', { device: deviceRaw, prefetched: raw });
-    } catch (error) {
-      console.log('Error getting extend history:', error);
-      navigateToScreen('historyExtend', { device: deviceRaw });
-    }
+      const hist = await getExtendHistory({ accessToken: token, deviceId: d?._id || d?.id });
+      navigateToScreen('historyExtend', { device: d, prefetched: hist });
+    } catch { navigateToScreen('historyExtend', { device: d }); }
   };
 
-  const handlePasswordSubmit = async () => {
-    if (!password) {
-      showMessage(t('enterConfirmPwd'));
+  const goHistory = async (d) => {
+    try {
+      const minimalList = items.map(x => ({
+        id: x._id,
+        code: String(x.code || x.raw?.device_code || ''),
+        name: (x.name || '').trim(),
+      }));
+      await AsyncStorage.setItem(K_HISTORY_PREF, JSON.stringify({
+        preselectedDeviceCode: String(d?.device_code || d?.code || '').trim() || 'all',
+        devices: minimalList,
+      }));
+    } catch {}
+    navigateToScreen('historyExtend', {});
+  };
+
+  const FilterChip = ({ val, label, icon }) => {
+    const active = filter === val;
+    return (
+      <TouchableOpacity
+        onPress={() => { setFilter(val); setPage(1); }}
+        style={[styles.chip, active && styles.chipActive]}
+        activeOpacity={0.9}
+      >
+        {!!icon && (
+          <Icon name={icon} size={14} color={active ? '#fff' : '#3478F6'} style={{ marginRight: 6 }} />
+        )}
+        <Text style={[styles.chipText, active && styles.chipTextActive]} numberOfLines={1}>
+          {label}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  const StatusDot = ({ s }) => (
+    <View style={[styles.dot, { backgroundColor: STATUS_COLOR[s] || '#94A3B8' }]} />
+  );
+
+  const PortBadge = ({ n, status }) => (
+    <View style={[styles.portBadge, { borderColor: STATUS_COLOR[status] || '#CBD5E1' }]}>
+      <StatusDot s={status} />
+      <Text style={styles.portText}>P{n} · {status || '—'}</Text>
+    </View>
+  );
+
+  const isDeviceOffline = (it) => {
+    const s = (it?.status || '').toLowerCase();
+    return s === 'offline' || s === 'unavailable';
+  };
+
+  const handleCreateOrderPress = (it) => {
+    if (isDeviceOffline(it)) {
+      showMessage(t('offlineHint'));
       return;
     }
-    
-    try {
-      setChecking(true);
-      const savedUsername = await AsyncStorage.getItem('username');
-      
-      if (!savedUsername) {
-        showMessage(t('missingUsername'));
-        return;
-      }
-      
-      const res = await loginApi(savedUsername, password);
-      
-      await AsyncStorage.setItem('access_token', res.access_token);
-      await AsyncStorage.setItem('refresh_token', res.refresh_token || '');
-      
-      setShowPasswordModal(false);
-      setPassword('');
-      
-      navigateToScreen('AddDevices', {
-        rawDevices,
-        devices,
-        suggestedIMEI: devices?.[0]?.imei || '',
-        from: 'DeviceList',
-      });
-    } catch {
-      showMessage(t('wrongPwd'));
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  const handlePasswordCancel = () => {
-    setShowPasswordModal(false);
-    setPassword('');
+    goExtend(it.raw);
   };
 
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        {!isSearching ? (
-          <>
-            <Text style={styles.headerTitle}>{t('header')}</Text>
-            <TouchableOpacity style={styles.iconBtn} onPress={() => setIsSearching(true)}>
-              <Icon name="search" size={24} color="white" />
+        <Text style={styles.headerTitle}>{t('header')}</Text>
+      </View>
+
+      {/* Search */}
+      <View style={styles.searchRow}>
+        <View style={styles.searchBox}>
+          <Icon name="search" size={20} color="#9DB7E8" />
+          <TextInput
+            style={styles.searchInput}
+            value={query}
+            onChangeText={(text) => { setQuery(text); setPage(1); }}
+            placeholder={t('searchPH')}
+            placeholderTextColor="#9DB7E8"
+            returnKeyType="search"
+          />
+          {!!query && (
+            <TouchableOpacity onPress={() => { setQuery(''); setPage(1); }}>
+              <Icon name="close" size={18} color="#9DB7E8" />
             </TouchableOpacity>
-          </>
-        ) : (
+          )}
+        </View>
+      </View>
+
+      {/* Compact Filters */}
+      <View style={styles.filterWrap}>
+        <FilterChip val="all"      label={STRINGS[lang].filters.all}      icon="grid-view" />
+        <FilterChip val="online"   label={STRINGS[lang].filters.online}   icon="wifi" />
+        <FilterChip val="offline"  label={STRINGS[lang].filters.offline}  icon="signal-wifi-off" />
+      </View>
+
+      {/* List */}
+      <ScrollView
+        style={{flex:1}}
+        contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 22 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* 👇 Nếu đang loading lần đầu → show 8 skeleton card */}
+        {loading && (
           <>
-            <TouchableOpacity style={styles.iconBtn} onPress={() => { setIsSearching(false); setQuery(''); }}>
-              <Icon name="arrow-back" size={24} color="white" />
-            </TouchableOpacity>
-            <View style={styles.searchBar}>
-              <Icon name="search" size={20} color="#cfe3ff" />
-              <TextInput
-                style={styles.searchInput}
-                value={query}
-                onChangeText={setQuery}
-                placeholder={t('searchPH')}
-                placeholderTextColor="#cfe3ff"
-                autoFocus
-                returnKeyType="search"
-                selectionColor="#fff"
-              />
-              {!!query && (
-                <TouchableOpacity onPress={() => setQuery('')}>
-                  <Icon name="close" size={20} color="#cfe3ff" />
-                </TouchableOpacity>
-              )}
-            </View>
-            <View style={styles.iconBtn} />
+            {Array.from({ length: 8 }).map((_, i) => <PortCardSkeleton key={`sk-${i}`} />)}
           </>
         )}
-      </View>
 
-      {/* Content */}
-      <View style={styles.content}>
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-        >
-          {filteredDevices.map((d) => (
-           <TouchableOpacity
-  key={d.id}
-  style={[styles.deviceCard, d.isExpired && styles.expiredCard]}
-  activeOpacity={0.8}
-  onPress={() => handleDeviceSettings(d.raw)} // 👈 bấm card cũng mở settings
->
-  <Image source={d.isExpired ? iconsGpsExpires : logoGPS} style={styles.logoGps} />
-  <View style={{ flex: 1 }}>
-    <View style={styles.cardHeaderRow}>
-      <Text style={styles.vehicleNumber} numberOfLines={1}>
-        {t('vehiclePlate')}: {d.vehicleNumber}
-      </Text>
-      <TouchableOpacity style={styles.smallIconBtn} onPress={() => handleEditDevice(d.raw)}>
-         
-        <Icon name="edit" size={18} color="#4A90E2" />
-      </TouchableOpacity>
-    </View>
-    <Text style={styles.infoText} numberOfLines={1}>{t('driver')}: {d.driverNumber}</Text>
-    <Text style={styles.infoText} numberOfLines={1}>{t('vehicleType')}: {d.vehicleType}</Text>
-    <View style={styles.row}>
-      <Text style={styles.infoText} numberOfLines={1}>{t('devicePhone')}: {d.devicePhone}</Text>
-      <View style={styles.stackRight}>
-        <TouchableOpacity style={styles.smallIconBtn} onPress={() => handleCallDevice(d.raw)}>
-          <Icon name="phone" size={18} color="#4A90E2" />
-        </TouchableOpacity>
-      </View>
-    </View>
-    <Text style={[styles.infoText, styles.dateLine]} numberOfLines={1}>
-      {t('activedDate')}: {d.activeDate}
-    </Text>
-    <Text
-      style={[
-        styles.infoText,
-        styles.dateLine,
-        d.isExpired && styles.expiredText
-      ]}
-      numberOfLines={1}
-    >
-      {d.isExpired ? `${t('isExpired')}: ` : `${t('expiredDate')}: `}{d.expiryDate}
-    </Text>
-    <View style={styles.bottomRow}>
-      <TouchableOpacity style={styles.extendButton} onPress={() => handleExtendDevice(d.raw)}>
-        <Text style={styles.extendText}>{t('extend')}</Text>
-        <Icon name="arrow-forward" size={18} color="white" />
-      </TouchableOpacity>
-      <View style={{ flex: 1 }} />
-      <TouchableOpacity
-        style={[styles.trailingIconBtn, { marginLeft: 6 }]}
-        onPress={() => handleDeviceSettings(d.raw)}
-      >
-        <Icon name="tune" size={22} color="#4A90E2" />
-      </TouchableOpacity>
-    </View>
-  </View>
-</TouchableOpacity>
+        {/* Hết loading thì render list thực */}
+        {!loading && pagedData.map((it) => {
+          const offline = isDeviceOffline(it);
 
-          ))}
-          
-          {/* Empty state */}
-          {hasFetchedOnce && filteredDevices.length === 0 && (
-            <Text style={{ textAlign: 'center', color: '#666', marginTop: 24 }}>
-              {t('empty')}
-            </Text>
-          )}
-        </ScrollView>
-        
-        <TouchableOpacity style={styles.addButton} onPress={handleAddDevice}>
-          <View style={styles.addCircle}>
-            <Icon name="add" size={18} color="#4A90E2" />
-          </View>
-          <Text style={styles.addButtonText}>{t('addDevice')}</Text>
-        </TouchableOpacity>
-      </View>
+          return (
+            <View key={it.id} style={styles.card}>
+              <View style={styles.cardHead}>
+                {/* LEFT */}
+                <View style={{flex:1}}>
+                  <View style={{flexDirection:'row', alignItems:'center'}}>
+                    <StatusDot s={it.status} />
+                    <Text style={[styles.name, { marginLeft: 6 }]} numberOfLines={1}>{it.name}</Text>
+                  </View>
 
-      {/* Password Modal */}
-      <Modal animationType="fade" transparent visible={showPasswordModal} onRequestClose={handlePasswordCancel}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>{t('modalTitle')}</Text>
-            <View style={styles.passwordInputContainer}>
-              <View style={styles.passwordInputWrapper}>
-                <Icon name="lock" size={20} color="#999" style={styles.lockIcon} />
-                <TextInput
-                  style={styles.passwordInput}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder={t('modalPH')}
-                  secureTextEntry={!showPassword}
-                  placeholderTextColor="#999"
-                />
-                <TouchableOpacity onPress={() => setShowPassword(s => !s)} style={styles.eyeIcon}>
-                  <Icon name={showPassword ? 'visibility-off' : 'visibility'} size={20} color="#999" />
+                  {/* Mã thiết bị (code) + vị trí */}
+                  <Text style={[styles.meta, { flexWrap: 'wrap', flexShrink: 1 }]}>
+                    {t('deviceCode')}: <Text style={styles.bold}>{it.code}</Text>
+                  </Text>
+                </View>
+
+                {/* RIGHT */}
+                <View style={styles.rightInfo}>
+                  <Text style={styles.metaRight}>{t('ports')}: <Text style={styles.bold}>{it.portsCount}</Text></Text>
+                  <Text style={styles.metaRight}>{t('fw')}: <Text style={styles.bold}>{it.fw}</Text></Text>
+                  <Text style={styles.metaRight}>{t('voltage')}: <Text style={styles.bold}>{it.voltage != null ? `${it.voltage} ` : '—'}</Text></Text>
+                  <Text style={styles.metaRight}>
+                    {t('temp')}: <Text style={styles.bold}>{it.raw?.temperature} °C</Text>
+                  </Text>
+                </View>
+              </View>
+
+              {!!it.ports?.length && (
+                <View style={styles.portRow}>
+                  {it.ports.map(p => (
+                    <PortBadge key={`${it.id}-${p.n}`} n={p.n} status={p.status} />
+                  ))}
+                </View>
+              )}
+
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={[styles.actionBtn, offline && styles.actionBtnDisabled]}
+                  disabled={offline}
+                  onPress={() => handleCreateOrderPress(it)}
+                >
+                  <Icon name="bolt" size={18} color={offline ? '#9CA3AF' : '#4A90E2'} />
+                  <Text style={[styles.actionText, offline && styles.actionTextDisabled]}>{t('createOrder')}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.actionBtn} onPress={() => navigateToScreen('phoneUser')}>
+                  <Icon name="tune" size={18} color="#4A90E2" />
+                  <Text style={styles.actionText}>{t('settings')}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.actionBtn} onPress={() => goHistory(it.raw)}>
+                  <Icon name="history" size={18} color="#4A90E2" />
+                  <Text style={styles.actionText}>{t('history')}</Text>
                 </TouchableOpacity>
               </View>
             </View>
-            <View style={styles.modalButtonContainer}>
-              <TouchableOpacity style={styles.modalCancelButton} onPress={handlePasswordCancel}>
-                <Text style={styles.modalCancelButtonText}>{t('close')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalConfirmButton, checking && { opacity: 0.6 }]}
-                onPress={handlePasswordSubmit}
-                disabled={checking}
-              >
-                <Text style={styles.modalConfirmButtonText}>{checking ? t('checking') : t('agree')}</Text>
-              </TouchableOpacity>
-            </View>
+          );
+        })}
+
+        {/* Khi KHÔNG loading và rỗng thật sự → hiện empty */}
+        {!loading && filtered.length === 0 && (
+          <Text style={{ textAlign:'center', color:'#64748B', marginTop: 28 }}>{t('empty')}</Text>
+        )}
+
+        {/* Pagination Controls */}
+        {!loading && filtered.length > limit && (
+          <View style={styles.pagination}>
+            <TouchableOpacity disabled={page <= 1} onPress={() => setPage(p => Math.max(1, p - 1))}>
+              <Text style={[styles.pageBtn, page <= 1 && styles.pageBtnDisabled]}>Trước</Text>
+            </TouchableOpacity>
+            <Text style={styles.pageInfo}>{page} / {totalPages}</Text>
+            <TouchableOpacity disabled={page >= totalPages} onPress={() => setPage(p => Math.min(totalPages, p + 1))}>
+              <Text style={[styles.pageBtn, page >= totalPages && styles.pageBtnDisabled]}>Sau</Text>
+            </TouchableOpacity>
           </View>
-        </View>
-      </Modal>
+        )}
+      </ScrollView>
     </View>
   );
-};
-
-export default DeviceList;
+}
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  container: { flex:1, backgroundColor:'#F6F7FB' },
+
   header: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    paddingTop: 25,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    backgroundColor:'#4A90E2',
+    paddingHorizontal:12, paddingTop: Platform.OS==='ios'? 12: 12, paddingBottom:12,
   },
-  headerTitle: { color: 'white', fontSize: 20, fontWeight: '600' },
-  iconBtn: { padding: 6 },
-  searchBar: {
-    flex: 1,
+  headerTitle: { color:'#fff', fontSize:20, fontWeight:'800' },
+
+  searchRow: { padding:14, paddingBottom:8 },
+  searchBox: {
+    flexDirection:'row', alignItems:'center',
+    backgroundColor:'#E9F2FF', borderRadius:12, paddingHorizontal:12, height:44,
+    borderWidth:1, borderColor:'#CDE1FF',
+  },
+  searchInput: { flex:1, fontSize:15, color:'#0F172A' },
+
+  filterWrap: {
+    paddingHorizontal: 14,
+    paddingBottom: 8,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(255,255,255,0.18)',
-    borderRadius: 10,
+    flexWrap: 'wrap',
+    columnGap: 8,
+    rowGap: 8,
+  },
+  chip: {
+    height: 34,
     paddingHorizontal: 10,
-    marginHorizontal: 6,
-    height: 38,
-  },
-  searchInput: { flex: 1, color: '#fff', fontSize: 15, paddingVertical: 0 },
-  content: { flex: 1, paddingHorizontal: 12, paddingTop: 12 },
-  deviceCard: {
-    flexDirection: 'row',
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 10,
-    marginBottom: 12,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#4A90E2',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 1.5,
-    elevation: 1,
-  },
-  expiredCard: {
-    borderColor: '#E53935',
-  },
-  logoGps: {
-    width: 40, height: 40,
-    resizeMode: 'contain',
-    marginRight: 10,
-    marginTop: 4,
-  },
-  cardHeaderRow: {
+    borderColor: '#CFE0FF',
+    backgroundColor: '#F3F7FF',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
   },
-  vehicleNumber: { fontSize: 15, fontWeight: '700', color: '#333', flex: 1, paddingRight: 8 },
-  infoText: { fontSize: 13, color: '#333', marginBottom: 2, lineHeight: 18 },
-  dateLine: { marginTop: 2 },
-  expiredText: { color: '#E53935', fontWeight: '700' },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2 },
-  stackRight: { alignItems: 'center' },
-  smallIconBtn: {
-    width: 30, height: 30,
-    borderRadius: 15,
-    backgroundColor: '#E3F2FD',
-    alignItems: 'center', justifyContent: 'center',
+  chipActive: { backgroundColor: '#4A90E2', borderColor: '#4A90E2' },
+  chipText: { color: '#3478F6', fontWeight: '700', fontSize: 12, maxWidth: 110 },
+  chipTextActive: { color: '#fff' },
+
+  card: {
+    backgroundColor:'#fff', borderRadius:16, padding:14, marginBottom:12,
+    borderWidth:1, borderColor:'#E6EEF9',
   },
-  bottomRow: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
-  extendButton: {
-    backgroundColor: '#4A90E2',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    gap: 6,
+  cardHead: { flexDirection:'row', gap:12 },
+  rightInfo: { minWidth: 170, alignItems:'flex-end' },
+
+  name: { fontSize:16, fontWeight:'800', color:'#0F172A' },
+  meta: { fontSize:12, color:'#6B7280', marginTop:2 },
+  metaRight: { fontSize:12, color:'#6B7280' },
+  bold: { color:'#0F172A', fontWeight:'800' },
+  dot: { width:10, height:10, borderRadius:5 },
+
+  portRow: { flexDirection:'row', flexWrap:'wrap', gap:8, marginTop:10 },
+  portBadge: {
+    borderWidth:1, borderRadius:999, paddingVertical:6, paddingHorizontal:10,
+    flexDirection:'row', alignItems:'center', gap:6, backgroundColor:'#fff',
   },
-  extendText: { color: 'white', fontSize: 14, fontWeight: '600' },
-  trailingIconBtn: {
-    width: 32, height: 32,
-    borderRadius: 16,
-    backgroundColor: '#E3F2FD',
-    alignItems: 'center', justifyContent: 'center',
+  portText: { fontSize:12, color:'#0F172A', fontWeight:'700' },
+
+  actionRow: { flexDirection:'row', gap:10, marginTop:12 },
+  actionBtn: {
+    flex:1, height:40, borderRadius:12, borderWidth:1.2, borderColor:'#CDE1FF',
+    backgroundColor:'#F7FAFF', alignItems:'center', justifyContent:'center', flexDirection:'row', gap:8,
   },
-  addButton: {
-    alignSelf: 'center',
-    marginTop: 6,
-    marginBottom: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 26,
-    borderWidth: 2,
-    borderColor: '#4A90E2',
-    backgroundColor: 'white',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+  actionText: { color:'#2563EB', fontWeight:'800' },
+
+  actionBtnDisabled: {
+    opacity: 0.45,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F3F4F6',
   },
-  addCircle: { width: 26, height: 26, borderRadius: 13, backgroundColor: '#E3F2FD', alignItems: 'center', justifyContent: 'center' },
-  addButtonText: { color: '#4A90E2', fontSize: 16, fontWeight: '600' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContainer: { backgroundColor: 'white', borderRadius: 15, padding: 24, margin: 20, width: '90%', maxWidth: 360 },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#4A90E2', textAlign: 'center', marginBottom: 20 },
-  passwordInputContainer: { marginBottom: 24 },
-  passwordInputWrapper: {
-    flexDirection: 'row', alignItems: 'center',
-    borderWidth: 1, borderColor: '#ddd', borderRadius: 10,
-    backgroundColor: 'white', paddingHorizontal: 14, height: 50,
+  actionTextDisabled: { color: '#9CA3AF' },
+
+  pagination: {
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'center',
+    marginTop: 12, gap: 14
   },
-  lockIcon: { marginRight: 8 },
-  passwordInput: { flex: 1, fontSize: 16, color: '#333', paddingVertical: 0 },
-  eyeIcon: { padding: 4, marginLeft: 6 },
-  modalButtonContainer: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
-  modalCancelButton: { flex: 1, backgroundColor: 'white', borderRadius: 26, paddingVertical: 12, alignItems: 'center', borderWidth: 1, borderColor: '#ddd' },
-  modalCancelButtonText: { color: '#666', fontSize: 16, fontWeight: '600' },
-  modalConfirmButton: { flex: 1, backgroundColor: '#4A90E2', borderRadius: 26, paddingVertical: 12, alignItems: 'center' },
-  modalConfirmButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
+  pageBtn: { padding: 8, fontWeight: '800', color: '#2563EB' },
+  pageBtnDisabled: { color: '#94A3B8' },
+  pageInfo: { fontWeight: '700', color: '#0F172A' }
 });
