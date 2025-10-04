@@ -6,6 +6,11 @@ const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
  *
  * @type {import('@react-native/metro-config').MetroConfig}
  */
-const config = {};
+const defaultConfig = getDefaultConfig(__dirname);
 
-module.exports = mergeConfig(getDefaultConfig(__dirname), config);
+module.exports = mergeConfig(defaultConfig, {
+  resolver: {
+    // 🔥 Bỏ .web.js khỏi danh sách platform khi build mobile
+    sourceExts: defaultConfig.resolver.sourceExts.filter(ext => ext !== 'web.js'),
+  },
+});
