@@ -10,7 +10,8 @@
     "start": "react-native start",
     "test": "jest",
     "web": "cross-env BABEL_CONFIG_FILE=babel.config.web.js webpack serve --mode development",
-    "web:build": "cross-env NODE_ENV=production webpack --config webpack.config.js"
+    "web:build": "cross-env NODE_ENV=production webpack --config webpack.config.js",
+    "build": "cross-env NODE_ENV=production webpack --config webpack.config.js"
 
   },
   "dependencies": {
