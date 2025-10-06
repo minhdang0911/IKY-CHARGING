@@ -58,51 +58,31 @@ export default function useLogin({ notify, onSuccess, initialLang = 'vi' }) {
   const changeLanguage = async (lang) => { setLanguage(lang); await AsyncStorage.setItem(LANG_KEY, lang); };
 
   const submit = async ({ externalLoginCallback }) => {
-  setErrorText('');
-  if (!username || !password) {
-    const m = t('needUserPass');
-    setErrorText(m); bumpShake(); notify(m); return;
-  }
-  if (loading) return;
+    setErrorText('');
+    if (!username || !password) {
+      setErrorText(t('needUserPass'));
+      bumpShake(); notify(t('needUserPass')); return;
+    }
+    if (loading) return;
 
-  setLoading(true);
-  try {
-    // 1) Gọi API
-    const res = await loginApi(username.trim(), password);
-    if (!res?.accessToken) throw new Error('Login OK nhưng thiếu accessToken');
-
-    // 2) Lưu token/user (bắt lỗi riêng để biết storage hư)
     try {
+      setLoading(true);
+      const res = await loginApi(username.trim(), password);
       await saveTokens({ accessToken: res.accessToken, refreshToken: res.refreshToken });
       await saveUserInfo(res?.user, username.trim());
       await setRememberFlag(!!remember);
-      await AsyncStorage.setItem('username', username.trim());
-    } catch (e) {
-      console.error('[AUTH] Lỗi lưu storage:', e);
-      const m = 'Lỗi lưu token vào storage (web/localStorage)'; // thông báo đúng bản chất
-      setErrorText(m); bumpShake(); notify(m);
-      return; // đừng đi tiếp nếu chưa lưu được
+      externalLoginCallback?.({ username, user: res.user }); // optional
+      onSuccess?.();
+      notify(t('loginSuccess'));
+    } catch (err) {
+      let msg = err?.message || t('loginFail');
+      try { const parsed = JSON.parse(err.message); msg = parsed?.message || msg; } catch {}
+      setErrorText(t('invalid'));
+      bumpShake(); notify(t('invalid'));
+    } finally {
+      setLoading(false);
     }
-
-    // 3) Thành công
-    externalLoginCallback?.({ username, user: res.user });
-    onSuccess?.();
-    notify(t('loginSuccess'));
-  } catch (err) {
-    // Lỗi API (hoặc lỗi khác trước khối lưu)
-    let msg = err?.message || t('loginFail');
-    try {
-      const parsed = JSON.parse(err.message);
-      msg = parsed?.message || msg;
-    } catch {}
-    console.error('[AUTH] Login failed:', msg, err);
-    setErrorText(msg);           // đừng hardcode 'invalid' nữa
-    bumpShake(); notify(msg);
-  } finally {
-    setLoading(false);
-  }
-};
-
+  };
 
   return {
     // state
