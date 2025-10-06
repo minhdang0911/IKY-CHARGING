@@ -4,6 +4,7 @@ import { saveTokens, saveUserInfo, setRememberFlag, getRememberFlag } from '../u
 import { STRINGS, LANG_KEY } from '../i18n/strings';
 import { login as loginApi } from '../apis/auth';
 import { Animated } from 'react-native';
+import { getOrCreateDeviceId } from '../utils/deviceId';
 
 export default function useLogin({ notify, onSuccess, initialLang = 'vi' }) {
   const [username, setUsername] = useState('');
@@ -14,8 +15,8 @@ export default function useLogin({ notify, onSuccess, initialLang = 'vi' }) {
   const [errorText, setErrorText] = useState('');
 
   // label animations + focus states
-  const usernameLabelAnim = useRef(new Animated.Value(0));
-  const passwordLabelAnim = useRef(new Animated.Value(0));
+  const usernameLabelAnimRef = useRef(new Animated.Value(0));
+  const passwordLabelAnimRef = useRef(new Animated.Value(0));
   const [usernameFocused, setUsernameFocused] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
 
@@ -34,14 +35,19 @@ export default function useLogin({ notify, onSuccess, initialLang = 'vi' }) {
   useEffect(() => {
     (async () => {
       try {
+        // prewarm deviceId để lần login đầu không phải chờ
+        await getOrCreateDeviceId();
+
         const savedLang = await AsyncStorage.getItem(LANG_KEY);
         if (savedLang) setLanguage(savedLang);
+
         const remembered = await getRememberFlag();
         setRemember(remembered);
+
         const savedUser = await AsyncStorage.getItem('username');
         if (savedUser && remembered) {
           setUsername(savedUser);
-          Animated.timing(usernameLabelAnim.current, { toValue: 1, duration: 180, useNativeDriver: false }).start();
+          Animated.timing(usernameLabelAnimRef.current, { toValue: 1, duration: 180, useNativeDriver: false }).start();
         }
       } catch {}
     })();
@@ -50,35 +56,51 @@ export default function useLogin({ notify, onSuccess, initialLang = 'vi' }) {
   const t = (k) => STRINGS[language]?.[k] || k;
 
   const animateLabel = (v, to) => Animated.timing(v, { toValue: to, duration: 180, useNativeDriver: false }).start();
-  const onFocusU = () => { setUsernameFocused(true); animateLabel(usernameLabelAnim.current, 1); };
-  const onBlurU  = () => { setUsernameFocused(false); if (!username) animateLabel(usernameLabelAnim.current, 0); };
-  const onFocusP = () => { setPasswordFocused(true); animateLabel(passwordLabelAnim.current, 1); };
-  const onBlurP  = () => { setPasswordFocused(false); if (!password) animateLabel(passwordLabelAnim.current, 0); };
+  const onFocusU = () => { setUsernameFocused(true); animateLabel(usernameLabelAnimRef.current, 1); };
+  const onBlurU  = () => { setUsernameFocused(false); if (!username) animateLabel(usernameLabelAnimRef.current, 0); };
+  const onFocusP = () => { setPasswordFocused(true); animateLabel(passwordLabelAnimRef.current, 1); };
+  const onBlurP  = () => { setPasswordFocused(false); if (!password) animateLabel(passwordLabelAnimRef.current, 0); };
 
   const changeLanguage = async (lang) => { setLanguage(lang); await AsyncStorage.setItem(LANG_KEY, lang); };
 
   const submit = async ({ externalLoginCallback }) => {
     setErrorText('');
     if (!username || !password) {
-      setErrorText(t('needUserPass'));
-      bumpShake(); notify(t('needUserPass')); return;
+      const m = t('needUserPass');
+      setErrorText(m); bumpShake(); notify(m); return;
     }
     if (loading) return;
 
+    setLoading(true);
     try {
-      setLoading(true);
+      // loginApi đã tự kèm deviceId
       const res = await loginApi(username.trim(), password);
-      await saveTokens({ accessToken: res.accessToken, refreshToken: res.refreshToken });
-      await saveUserInfo(res?.user, username.trim());
-      await setRememberFlag(!!remember);
-      externalLoginCallback?.({ username, user: res.user }); // optional
+      if (!res?.accessToken) throw new Error('Login OK nhưng thiếu accessToken');
+
+      try {
+        await saveTokens({ accessToken: res.accessToken, refreshToken: res.refreshToken });
+        await saveUserInfo(res?.user, username.trim());
+        await setRememberFlag(!!remember);
+        await AsyncStorage.setItem('username', username.trim());
+      } catch (e) {
+        console.error('[AUTH] Lỗi lưu storage:', e);
+        const m = 'Lỗi lưu token vào storage (web/localStorage)';
+        setErrorText(m); bumpShake(); notify(m);
+        return;
+      }
+
+      externalLoginCallback?.({ username, user: res.user });
       onSuccess?.();
       notify(t('loginSuccess'));
     } catch (err) {
       let msg = err?.message || t('loginFail');
-      try { const parsed = JSON.parse(err.message); msg = parsed?.message || msg; } catch {}
-      setErrorText(t('invalid'));
-      bumpShake(); notify(t('invalid'));
+      try {
+        const parsed = JSON.parse(err.message);
+        msg = parsed?.message || msg;
+      } catch {}
+      console.error('[AUTH] Login failed:', msg, err);
+      setErrorText(msg);
+      bumpShake(); notify(msg);
     } finally {
       setLoading(false);
     }
@@ -92,8 +114,8 @@ export default function useLogin({ notify, onSuccess, initialLang = 'vi' }) {
     remember, setRemember,
     loading, errorText, setErrorText,
     // anim/focus
-    usernameLabelAnim: usernameLabelAnim.current,
-    passwordLabelAnim: passwordLabelAnim.current,
+    usernameLabelAnim: usernameLabelAnimRef.current,
+    passwordLabelAnim: passwordLabelAnimRef.current,
     usernameFocused, passwordFocused,
     onFocusU, onBlurU, onFocusP, onBlurP,
     shakeAnim,
