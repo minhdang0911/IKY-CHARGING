@@ -13,6 +13,7 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const LANG_KEY = 'app_language';
+const ICON_W = 24; // hộp cố định cho icon
 
 // ========= i18n =========
 const STRINGS = {
@@ -111,38 +112,29 @@ export default function OrderDetail({ order, navigateToScreen }) {
     try {
       navigateToScreen?.('historyExtend');
     } finally {
-      // nhỏ delay để tránh double-trigger khi vừa gesture vừa nút
       setTimeout(() => { navigatingRef.current = false; }, 300);
     }
   };
 
-  // ANDROID: back cứng → chỉ back trang, không thoát app
+  // ANDROID: back cứng
   useEffect(() => {
     const onHWBack = () => {
       goBack();
-      return true; // chặn default (không đóng app)
+      return true;
     };
     const sub = BackHandler.addEventListener('hardwareBackPress', onHWBack);
     return () => sub.remove();
   }, []);
 
-  // iOS: edge-swipe (tự chế nhẹ) để back nếu m không dùng React Navigation gesture
+  // iOS: edge-swipe back
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: (e, g) => {
-        // chỉ bắt gesture khi bắt đầu từ mép trái
-        return Platform.OS === 'ios' && g.x0 <= 20;
-      },
-      onMoveShouldSetPanResponder: (e, g) => {
-        // kéo ngang phải đủ
-        return Platform.OS === 'ios' && g.dx > 10 && Math.abs(g.dy) < 20;
-      },
+      onStartShouldSetPanResponder: (e, g) => Platform.OS === 'ios' && g.x0 <= 20,
+      onMoveShouldSetPanResponder: (e, g) =>
+        Platform.OS === 'ios' && g.dx > 10 && Math.abs(g.dy) < 20,
       onPanResponderMove: () => {},
       onPanResponderRelease: (e, g) => {
-        // nếu kéo sang phải đủ xa thì back
-        if (Platform.OS === 'ios' && g.dx > 60) {
-          goBack();
-        }
+        if (Platform.OS === 'ios' && g.dx > 60) goBack();
       },
     })
   ).current;
@@ -162,7 +154,7 @@ export default function OrderDetail({ order, navigateToScreen }) {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity style={styles.backButton} onPress={goBack}>
-          <Icon name="arrow-back" size={24} color="#fff" />
+          <Text style={styles.backIcon}>{'‹'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('headerTitle')}</Text>
         <View style={{ width: 24 }} />
@@ -181,7 +173,7 @@ export default function OrderDetail({ order, navigateToScreen }) {
           <InfoRow icon="payments" label={t('amount')} value={fmtMoney(order?.amount)} />
           <Divider />
 
-          <InfoRow icon="account-balance-wallet" label={t('method')} value={String(order?.payment_method).toUpperCase()} />
+          <InfoRow icon="payments" label={t('method')} value={String(order?.payment_method).toUpperCase()} />
           <Divider />
 
           <InfoRow icon="power" label={t('port')} value={String(order?.portNumber)} />
@@ -190,7 +182,7 @@ export default function OrderDetail({ order, navigateToScreen }) {
           <InfoRow icon="event" label={t('createdAt')} value={fmtDate(order?.createdAt)} />
           <Divider />
 
-          <InfoRow icon="check-circle" label={t('paidAt')} value={fmtDate(order?.paidAt)} />
+          <InfoRow icon="payments" label={t('paidAt')} value={fmtDate(order?.paidAt)} />
         </View>
 
         {/* Đại lý */}
@@ -214,9 +206,9 @@ export default function OrderDetail({ order, navigateToScreen }) {
           <Divider />
           <InfoRow icon="bolt" label="Điện áp" value={`${order?.device_id?.voltage || 0} V`} />
           <Divider />
-          <InfoRow icon="device-thermostat" label="Nhiệt độ" value={`${order?.device_id?.temperature || 0} °C`} />
+          <InfoRow icon="bolt" label="Nhiệt độ" value={`${order?.device_id?.temperature || 0} °C`} />
           <Divider />
-          <InfoRow icon="system-update" label="Firmware" value={order?.device_id?.fw_version} />
+          <InfoRow icon="bolt" label="Firmware" value={order?.device_id?.fw_version} />
         </View>
 
         {/* Lịch sử trạng thái */}
@@ -229,7 +221,7 @@ export default function OrderDetail({ order, navigateToScreen }) {
                 <View style={[styles.historyDot, { backgroundColor: hColor }]} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.historyStatus}>{viStatus(h.status)}</Text>
-                  <Text style={styles.historyNote}>{h.note}</Text>
+                  {!!h.note && <Text style={styles.historyNote}>{h.note}</Text>}
                   <Text style={styles.historyTime}>{fmtDate(h.timestamp)}</Text>
                 </View>
               </View>
@@ -246,10 +238,12 @@ export default function OrderDetail({ order, navigateToScreen }) {
   );
 }
 
-// ========== Component phụ ==========
+/* ================== Components ================== */
 const SectionHeader = ({ icon, title }) => (
   <View style={styles.sectionHeader}>
-    <Icon name={icon} size={18} color="#2563eb" style={{ marginRight: 8 }} />
+    <View style={styles.iconBox}>
+      <Icon name={icon} size={18} color="#2563eb" />
+    </View>
     <Text style={styles.sectionTitle}>{title}</Text>
   </View>
 );
@@ -257,31 +251,51 @@ const SectionHeader = ({ icon, title }) => (
 const InfoRow = ({ icon, label, value }) => (
   <View style={styles.row}>
     <View style={styles.rowLeft}>
-      <Icon name={icon} size={18} color="#64748b" style={{ marginRight: 6 }} />
-      <Text style={styles.label}>{label}</Text>
+      <View style={styles.iconBox}>
+        <Icon name={icon} size={18} color="#64748b" />
+      </View>
+      <Text style={styles.label} numberOfLines={1}>
+        {label}
+      </Text>
     </View>
-    <Text style={styles.value} numberOfLines={2}>
-      {value || '—'}
-    </Text>
+
+    <View style={styles.valueBox}>
+      <Text style={styles.value} numberOfLines={2}>
+        {value || '—'}
+      </Text>
+    </View>
   </View>
 );
 
 const StatusRow = ({ label, value, color }) => (
   <View style={styles.row}>
     <View style={styles.rowLeft}>
-      <Icon name="info" size={18} color={color} style={{ marginRight: 6 }} />
-      <Text style={[styles.label, { color }]}>{label}</Text>
+      <View style={styles.iconBox}>
+        <Icon name="info" size={18} color={color} />
+      </View>
+      <Text style={[styles.label, { color }]} numberOfLines={1}>
+        {label}
+      </Text>
     </View>
+
     <View style={[styles.statusBadge, { borderColor: color }]}>
       <View style={[styles.dot, { backgroundColor: color }]} />
-      <Text style={[styles.statusText, { color }]}>{value}</Text>
+      <Text style={[styles.statusText, { color }]} numberOfLines={1}>
+        {value}
+      </Text>
     </View>
   </View>
 );
 
 const Divider = () => <View style={styles.divider} />;
 
-// ========== Styles ==========
+/* ================== Styles ================== */
+const BASE_TEXT = {
+  includeFontPadding: false,           // Android: bỏ padding font
+  textAlignVertical: 'center',         // Android
+  // lineHeight đặt ~ fontSize để baseline đều giữa các platform
+};
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F6F7FB' },
 
@@ -294,7 +308,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   backButton: { padding: 6, marginRight: 6 },
-  headerTitle: { flex: 1, color: '#fff', fontSize: 18, fontWeight: '700' },
+  backIcon: { ...BASE_TEXT, fontSize: 30, color: '#fff', lineHeight: 32 },
+  headerTitle: { ...BASE_TEXT, flex: 1, color: '#fff', fontSize: 18, fontWeight: '700', lineHeight: 22 },
 
   content: { flex: 1, padding: 16 },
 
@@ -313,23 +328,40 @@ const styles = StyleSheet.create({
   },
 
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  sectionTitle: { fontSize: 15, fontWeight: '800', color: '#111827' },
+  iconBox: {
+    width: ICON_W,
+    height: 20,
+    marginRight: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionTitle: { ...BASE_TEXT, fontSize: 15, fontWeight: '800', color: '#111827', lineHeight: 18 },
 
   row: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 6,
+    minHeight: 32,
   },
-  rowLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  rowLeft: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, flexGrow: 1 },
 
-  label: { fontSize: 14, color: '#374151', fontWeight: '600' },
+  label: { ...BASE_TEXT, fontSize: 14, color: '#374151', fontWeight: '600', lineHeight: 18, flexShrink: 1 },
+
+  // box bên phải để text không đẩy lệch layout
+  valueBox: {
+    flexShrink: 1,
+    maxWidth: '60%',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
   value: {
+    ...BASE_TEXT,
     fontSize: 14,
     color: '#111827',
     fontWeight: '500',
-    maxWidth: '55%',
     textAlign: 'right',
+    lineHeight: 18,
   },
 
   divider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 4 },
@@ -342,9 +374,10 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     backgroundColor: '#f8fafc',
+    marginLeft: 8,
   },
   dot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
-  statusText: { fontSize: 13, fontWeight: '700' },
+  statusText: { ...BASE_TEXT, fontSize: 13, fontWeight: '700', lineHeight: 16 },
 
   historyRow: {
     flexDirection: 'row',
@@ -358,9 +391,9 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginRight: 10,
   },
-  historyStatus: { fontSize: 14, fontWeight: '700', color: '#111827' },
-  historyNote: { fontSize: 13, color: '#475569', marginTop: 2 },
-  historyTime: { fontSize: 12, color: '#94a3b8', marginTop: 2 },
+  historyStatus: { ...BASE_TEXT, fontSize: 14, fontWeight: '700', color: '#111827', lineHeight: 18 },
+  historyNote: { ...BASE_TEXT, fontSize: 13, color: '#475569', marginTop: 2, lineHeight: 16 },
+  historyTime: { ...BASE_TEXT, fontSize: 12, color: '#94a3b8', marginTop: 2, lineHeight: 14 },
 
   closeBtn: {
     backgroundColor: '#2563eb',
@@ -370,7 +403,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 8,
   },
-  closeBtnText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+  closeBtnText: { ...BASE_TEXT, color: '#fff', fontWeight: '700', fontSize: 15, lineHeight: 18 },
 
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 });

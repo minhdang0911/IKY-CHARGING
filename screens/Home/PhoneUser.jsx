@@ -590,8 +590,8 @@ export default function ComingSoonScreen({ navigateToScreen }) {
         <View style={styles.features}>
           {[
             { icon: 'speed', text: 'Hiệu suất mạnh mẽ' },
-            { icon: 'design-services', text: 'Thiết kế hiện đại' },
-            { icon: 'verified-user', text: 'Bảo mật tối ưu' },
+            { icon: 'speed', text: 'Thiết kế hiện đại' },
+            { icon: 'speed', text: 'Bảo mật tối ưu' },
           ].map((item, index) => (
             <View key={index} style={styles.featureItem}>
               <View style={styles.featureIcon}>
@@ -608,7 +608,7 @@ export default function ComingSoonScreen({ navigateToScreen }) {
           activeOpacity={0.85}
           onPress={() => navigateToScreen('Device')}
         >
-          <Icon name="arrow-back" size={20} color="#fff" style={{ marginRight: 8 }} />
+         
           <Text style={styles.buttonText}>Quay lại</Text>
         </TouchableOpacity>
 

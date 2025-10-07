@@ -119,7 +119,7 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
-          <Icon name="arrow-back" size={24} color="white" />
+          <Text style={{fontSize: 30, color: '#fff'}}>{'‹'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('headerTitle')}</Text>
         {/* <TouchableOpacity style={styles.headerBtn} onPress={handleNotificationPress}>

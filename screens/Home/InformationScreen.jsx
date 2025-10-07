@@ -1,4 +1,3 @@
-// screens/Home/InformationScreen.jsx
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -15,9 +14,6 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import logoInfo from '../../assets/img/background.png';
 import { API_URL } from '@env';
-
-// ❌ Bỏ NotificationContext
-// import { NotificationContext } from '../../App';
 
 const LANG_KEY = 'app_language';
 
@@ -42,20 +38,14 @@ const STRINGS = {
   },
 };
 
-const openTel = phone => {
+const openTel = (phone) => {
   const url = `tel:${phone.replace(/\s/g, '')}`;
   Linking.openURL(url).catch(() => {});
 };
 
 export default function InformationScreen({ logout, navigateToScreen }) {
   const [language, setLanguage] = useState('vi');
-  const t = k => STRINGS[language][k] || k;
-
-  // 🔕 Không còn context → badge = 0, chỉ điều hướng sang màn notification
-  const unreadCount = 0;
-  const handleNotificationPress = () => {
-    navigateToScreen('notification', { from: 'Information' });
-  };
+  const t = (k) => STRINGS[language][k] || k;
 
   useEffect(() => {
     (async () => {
@@ -66,101 +56,80 @@ export default function InformationScreen({ logout, navigateToScreen }) {
     })();
   }, []);
 
-
   async function handleLogoutPress() {
-  try {
-    // lấy token hiện tại
-    const token = await AsyncStorage.getItem('access_token');
-
-    // gọi API logout (không cần body)
-    if (token) {
-      await fetch(`${API_URL}/api/auth/logout`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      }).catch(() => {}); // dù fail vẫn cleanup local
+    try {
+      const token = await AsyncStorage.getItem('access_token');
+      if (token) {
+        await fetch(`${API_URL}/api/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+      }
+    } finally {
+      await AsyncStorage.multiRemove([
+        'access_token',
+        'refresh_token',
+        'expires_at',
+        'user_oid',
+        'username',
+      ]);
+      logout && logout();
     }
-  } finally {
-    // dọn token & state local rồi gọi prop logout()
-    await AsyncStorage.multiRemove([
-      'access_token',
-      'refresh_token',
-      'expires_at',
-      'user_oid',
-      'username',
-    ]);
-    logout && logout();
   }
-}
-
 
   return (
     <SafeAreaView style={styles.wrap}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t('headerTitle')}</Text>
-        {/* <TouchableOpacity style={styles.headerBtn} onPress={handleNotificationPress}>
-          <View style={styles.notificationContainer}>
-            <Icon name="notifications" size={24} color="#fff" />
-            {unreadCount > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </Text>
-              </View>
-            )}
-          </View>
-        </TouchableOpacity> */}
       </View>
 
-      {/* Nội dung chính có thể scroll */}
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* để trống — sau chèn thêm gì thì chèn */}
-      </ScrollView>
+     <ScrollView
+  contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]}  
+  showsVerticalScrollIndicator={false}
+>
 
-      {/* Khung tính năng luôn nằm ngay trên nav */}
-      <View style={styles.featureWrap}>
         {/* Banner */}
         <View style={styles.bannerCard}>
-          <Image source={logoInfo} style={styles.bannerImg} />
+          <Image source={logoInfo} style={styles.bannerImg} resizeMode="contain" />
+          <Text style={styles.bannerText}>TRẠM SẠC XANH • TIỆN LỢI • HIỆN ĐẠI</Text>
         </View>
 
-        {/* Contact */}
-        <View style={styles.card}>
-          <TouchableOpacity
-            style={styles.contactRow}
-            onPress={() => openTel('0902 806 999')}
-          >
-            <Icon name="person" size={20} color="#666" />
+        {/* Contact Card */}
+        <View style={[styles.card]}>
+          <View style={styles.contactRow}>
+            <Icon name="person" size={22} color="#666" style={styles.contactIconLeft} />
             <View style={styles.contactText}>
               <Text style={styles.contactLabel}>{t('cs')}</Text>
-              <Text style={styles.contactPhone}>0902 806 999</Text>
+              <Text style={styles.contactPhone} onPress={() => openTel('0902 806 999')}>
+                0902 806 999
+              </Text>
             </View>
-            <Icon name="phone" size={20} color="#1e88e5" />
-          </TouchableOpacity>
+            <TouchableOpacity onPress={() => openTel('0902 806 999')}>
+              <Icon name="phone" size={22} color="#1e88e5" style={styles.contactIconRight} />
+            </TouchableOpacity>
+          </View>
 
           <View style={styles.divider} />
 
-          <TouchableOpacity
-            style={styles.contactRow}
-            onPress={() => openTel('0938 859 085')}
-          >
-            <Icon name="support-agent" size={20} color="#666" />
+          <View style={styles.contactRow}>
+            <Icon name="support-agent" size={22} color="#666" style={styles.contactIconLeft} />
             <View style={styles.contactText}>
               <Text style={styles.contactLabel}>{t('tech')}</Text>
-              <Text style={styles.contactPhone}>0938 859 085</Text>
+              <Text style={styles.contactPhone} onPress={() => openTel('0938 859 085')}>
+                0938 859 085
+              </Text>
             </View>
-            <Icon name="phone" size={20} color="#1e88e5" />
-          </TouchableOpacity>
+            <TouchableOpacity onPress={() => openTel('0938 859 085')}>
+              <Icon name="phone" size={22} color="#1e88e5" style={styles.contactIconRight} />
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* Menu */}
-        <View style={styles.card}>
+        {/* Menu Card */}
+        <View style={[styles.card]}>
           <MenuItem
-            icon="account-circle"
+             icon="info"
             text={t('accountInfo')}
             onPress={() => navigateToScreen('changeInfo')}
           />
@@ -178,9 +147,8 @@ export default function InformationScreen({ logout, navigateToScreen }) {
           />
           <View style={styles.divider} />
           <MenuItem icon="logout" text={t('logout')} onPress={handleLogoutPress} />
-
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -188,104 +156,124 @@ export default function InformationScreen({ logout, navigateToScreen }) {
 const MenuItem = ({ icon, text, onPress }) => (
   <TouchableOpacity style={styles.menuItem} onPress={onPress} activeOpacity={0.8}>
     <View style={styles.menuLeft}>
-      <Icon name={icon} size={20} color="#666" />
+      <Icon name={icon} size={22} color="#666" style={styles.menuIcon} />
       <Text style={styles.menuText}>{text}</Text>
     </View>
-    <Icon name="chevron-right" size={22} color="#bbb" />
+    <Icon name="chevron-right" size={24} color="#bbb" style={styles.iconFix} />
   </TouchableOpacity>
 );
 
 const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#f5f5f5' },
-
+  wrap: {
+    flex: 1,
+    backgroundColor: '#f5f7fa',
+  },
   header: {
     backgroundColor: '#1e88e5',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    paddingTop: Platform.OS === 'ios' ? 16 : 12,
+    paddingHorizontal: 32,
+    paddingVertical: 14,
     flexDirection: 'row',
     alignItems: 'center',
   },
-  headerTitle: { color: '#fff', fontSize: 18, fontWeight: '600', flex: 1 },
-  headerBtn: { padding: 6 },
-
-  notificationContainer: { position: 'relative' },
-  badge: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: '#ff4444',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  badgeText: {
+  headerTitle: {
     color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-    textAlign: 'center',
+    fontSize: 20,
+    fontWeight: '700',
   },
-
   scrollContent: {
-    padding: 14,
-    paddingBottom: 20,
+    paddingHorizontal: 60,
+    paddingVertical: 30,
+    alignItems: 'center',
   },
-
-  featureWrap: {
-    padding: 14,
-    backgroundColor: '#f5f5f5',
-  },
-
   bannerCard: {
+    width: '100%',
     backgroundColor: '#fff',
-    borderRadius: 16,
+    borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1.5,
     borderColor: '#90CAF9',
-    marginBottom: 14,
+    marginBottom: 30,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
   },
   bannerImg: {
     width: '100%',
-    height: 200,
-    resizeMode: 'cover',
-    marginTop:10
+    height: 300,
+    alignSelf: 'center',
   },
-
+  bannerText: {
+    textAlign: 'center',
+    paddingVertical: 14,
+    color: '#1e88e5',
+    fontSize: 17,
+    fontWeight: '600',
+    backgroundColor: '#E3F2FD',
+  },
   card: {
+    width: '100%',
     backgroundColor: '#fff',
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1.2,
-    borderColor: '#90CAF9',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginBottom: 10,
+    borderColor: '#cfd8dc',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    marginBottom: 20,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
   },
-
   contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    justifyContent: 'space-between',
+    paddingVertical: 12,
   },
-  contactText: { flex: 1, marginLeft: 12 },
-  contactLabel: { fontSize: 13, color: '#666', marginBottom: 2 },
-  contactPhone: { fontSize: 16, fontWeight: '700', color: '#00bcd4' },
-  divider: { height: 1, backgroundColor: '#eee' },
-
+  contactIconLeft: {
+    flexShrink: 0,
+    width: 28,
+    textAlign: 'center',
+    verticalAlign: 'middle',
+  },
+  contactIconRight: {
+    flexShrink: 0,
+    width: 28,
+    textAlign: 'center',
+    verticalAlign: 'middle',
+  },
+  contactText: {
+    flex: 1,
+    marginHorizontal: 12,
+    justifyContent: 'center',
+  },
+  contactLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2,
+  },
+  contactPhone: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#00bcd4',
+  },
+  divider: { height: 1, backgroundColor: '#eee', marginVertical: 8 },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 14,
     justifyContent: 'space-between',
   },
-  menuLeft: { flexDirection: 'row', alignItems: 'center' },
+  menuLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  menuIcon: {
+    width: 24,
+    textAlign: 'center',
+    marginRight: 10,
+    verticalAlign: 'middle',
+  },
   menuText: {
-    marginLeft: 10,
-    fontSize: 15,
+    fontSize: 16,
     color: '#333',
     fontWeight: '500',
+    lineHeight: 22, // ✅ canh icon ngang hàng chữ
   },
+  iconFix: { verticalAlign: 'middle' },
 });

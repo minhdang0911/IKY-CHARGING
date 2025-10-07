@@ -65,8 +65,16 @@ module.exports = {
 
   resolve: {
     alias: {
+      // ✅ Core mapping RN → RN Web
       'react-native$': 'react-native-web',
-      // mock native lib không có trên web
+
+      // ✅ Fix icon: map sang file mock web-friendly
+      'react-native-vector-icons/MaterialIcons': path.resolve(
+        __dirname,
+        'web-mocks/MaterialIcons.web.js'
+      ),
+
+      // ✅ Mock native lib không có trên web
       'react-native-fs': path.resolve(__dirname, 'web-mocks/react-native-fs.js'),
       'react-native-view-shot': path.resolve(__dirname, 'web-mocks/react-native-view-shot.js'),
       'react-native-share': path.resolve(__dirname, 'web-mocks/react-native-share.web.js'),
@@ -103,7 +111,7 @@ module.exports = {
     }),
   ],
 
-  // Dev server chỉ dùng local, không ảnh hưởng Vercel
+  // ✅ Dev server
   devServer: {
     static: path.join(__dirname, 'dist'),
     compress: true,

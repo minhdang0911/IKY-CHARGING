@@ -1,15 +1,23 @@
 // screens/Home/MonitoringScreen.jsx
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity,
-  FlatList, Platform, ToastAndroid, Alert, Image, Modal,
-  PermissionsAndroid, Linking
+  View, Text, StyleSheet, TouchableOpacity, Pressable,
+  FlatList, Platform, ToastAndroid, Alert, Image,
+  Modal, PermissionsAndroid, Linking
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import QRCode from 'react-native-qrcode-svg';
 import RNFS from 'react-native-fs';
-import { CameraRoll } from '@react-native-camera-roll/camera-roll';
+
+// CameraRoll: chỉ require khi KHÔNG phải web
+let CameraRoll;
+if (Platform.OS !== 'web') {
+  try {
+    // eslint-disable-next-line global-require
+    CameraRoll = require('@react-native-camera-roll/camera-roll').CameraRoll;
+  } catch {}
+}
 
 // ICONS
 import plugOffline from '../../assets/img/ic_offline.png';
@@ -63,6 +71,7 @@ const STRINGS = {
     errLoadDevices: 'Load devices lỗi',
     errLoadDeviceInfo: 'Load device info lỗi',
     missingToken: 'Thiếu accessToken',
+    viewDetail: 'Xem chi tiết',
   },
   en: {
     headerTitle: (name) => `Monitoring device: ${name || '—'}`,
@@ -98,6 +107,7 @@ const STRINGS = {
     errLoadDevices: 'Failed to load devices',
     errLoadDeviceInfo: 'Failed to load device info',
     missingToken: 'Missing accessToken',
+    viewDetail: 'View details',
   },
 };
 const useI18n = () => {
@@ -132,7 +142,6 @@ function formatDateTime(iso, lang = 'vi') {
     return new Date(iso).toLocaleString(loc);
   } catch { return '—'; }
 }
-
 function trim0(n, dp = 2) {
   if (!isFinite(n)) n = 0;
   return Number(n).toFixed(dp).replace(/\.?0+$/, '');
@@ -154,7 +163,7 @@ const K_MONI_SELECTED_ID  = 'moni_selected_id';
 const K_MONI_DEVICE_MAP   = 'moni_device_map';
 const SWR_MAX_AGE_MS = 60 * 1000;
 
-/* ====== ADAPTER (web rule) ====== */
+/* ====== ADAPTER ====== */
 function adaptDeviceInfoToUI(info, sessionsDev, lang) {
   const name = info?.name || info?.device_code || '—';
   const ports = Array.isArray(info?.ports) ? info.ports : [];
@@ -215,49 +224,118 @@ function adaptDeviceInfoToUI(info, sessionsDev, lang) {
   };
 }
 
-/* ========= LIVE OVERLAY by SSE (ưu tiên SSE) ========= */
-// TTL cho bản tin SSE; hết TTL thì trả về giá trị API
+/* ========= LIVE OVERLAY by SSE ========= */
 const LIVE_TTL_MS = 10 * 1000;
 
 // Map<device_code, { powerKW?:number, energyKWh?:number, status?:'online'|'offline', ts:number }>
 const liveRef = { current: new Map() };
 
-// base UI (từ API/cache). Ta render = applyLiveToUI(base)
- 
+/* ========= WebModal (giả lập Modal trên web) ========= */
+function WebModal({ visible, onRequestClose, children }) {
+  if (!visible) return null;
+  return (
+    <Pressable style={styles.modalOverlayAbs} onPress={onRequestClose}>
+      <View style={styles.modalContainer} onStartShouldSetResponder={() => true}>
+        {children}
+      </View>
+    </Pressable>
+  );
+}
 
-function applyLiveToUI(ui) {
-  if (!ui?.code) return ui;
-  const entry = liveRef.current.get(ui.code);
-  if (!entry) return ui;
+/* ========= ModalContent (nội dung modal, dùng chung web/native) ========= */
+function ModalContent({
+  t, headerName, modalPort,
+  buildCheckoutUrl, openLink, saveQrPng, qrRef
+}) {
+  return (
+    <>
+      {/* Header */}
+      <View style={styles.modalHeader}>
+        <View style={styles.modalHeaderLeft}>
+          <View style={styles.modalIconBadge}>
+            <Icon name="bolt" size={20} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.modalTitle}>{t('portDetail')}</Text>
+            {!!modalPort && (
+              <Text style={styles.modalSubtitle}>
+                {headerName} • {t('port')} {modalPort?.name} • {t(modalPort?.portTextStatus)}
+              </Text>
+            )}
+          </View>
+        </View>
+      </View>
 
-  const isFresh = (Date.now() - entry.ts) <= LIVE_TTL_MS;
-  const next = { ...ui };
+      {/* Content */}
+      {!!modalPort && (
+        <View style={styles.modalContent}>
+          <View style={styles.modalInfoCard}>
+            {[
+              ['Port', `${t('port')} ${modalPort.name}`],
+              [t('status'), t(modalPort.portTextStatus)],
+              [t('start'), modalPort.start],
+              [t('end'), modalPort.end],
+              [t('power'), formatPowerKW(modalPort.kw)],
+              [t('energy'), formatEnergyKWh(modalPort.kwh)],
+            ].map(([k, v], i) => (
+              <View key={k} style={[styles.modalInfoRow, i === 0 && { borderTopWidth: 0 }]}>
+                <Text style={styles.modalInfoKey}>{k}</Text>
+                <Text style={styles.modalInfoValue}>{v}</Text>
+              </View>
+            ))}
+          </View>
 
-  // overlay trạng thái nếu có packetType:2
-  if (entry.status) {
-    next.deviceStatus = String(entry.status).toLowerCase(); // 'online'|'offline'
-  }
+          {/* ==== QR AREA ==== */}
+          <Text style={styles.qrHint}>{t('tapQRHint')}</Text>
+          <View style={styles.qrWrap}>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
+            >
+              <View style={styles.qrBox}>
+                <QRCode
+                  value={buildCheckoutUrl(modalPort.portNumber)}
+                  size={200}
+                  quietZone={10}
+                  getRef={(c) => { qrRef.current = c; }}
+                />
+              </View>
+            </TouchableOpacity>
 
-  // overlay power/energy nếu còn fresh
-  if (isFresh && (typeof entry.powerKW === 'number' || typeof entry.energyKWh === 'number')) {
-    next.ports = (ui.ports || []).map(p => {
-      if (p?.visualStatus === 'charging') {
-        return {
-          ...p,
-          kw: (typeof entry.powerKW === 'number') ? entry.powerKW : p.kw,
-          kwh: (typeof entry.energyKWh === 'number') ? entry.energyKWh : p.kwh,
-        };
-      }
-      return p;
-    });
-  }
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.btnPrimary}
+                onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
+              >
+                {/* <Icon name="open-in-new" size={18} color="#fff" style={{ marginRight: 6 }} /> */}
+                <Text style={styles.btnPrimaryText}>{t('openLink')}</Text>
+              </TouchableOpacity>
 
-  return next;
+              <View style={{ width: 10 }} />
+
+              <TouchableOpacity
+                style={styles.btnGhost}
+                onPress={saveQrPng}
+              >
+                {/* <Icon name="file-download" size={18} color="#2563EB" style={{ marginRight: 6 }} /> */}
+                <Text style={styles.btnGhostText}>{t('saveQR')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          {/* ==== /QR AREA ==== */}
+        </View>
+      )}
+    </>
+  );
 }
 
 /* ===================== SCREEN ===================== */
 export default function MonitoringScreen() {
   const { t, lang } = useI18n();
+
+  // ✅ Spacer để chừa chỗ cho navBottom đang fixed
+  const BOTTOM_SPACER = Platform.select({ web: 120, default: 90 });
+  const FooterSpacer = useCallback(() => <View style={{ height: BOTTOM_SPACER }} />, [BOTTOM_SPACER]);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
@@ -271,8 +349,7 @@ export default function MonitoringScreen() {
   const [loadingList, setLoadingList] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-    const baseDeviceRef = useRef(null);
-
+  const baseDeviceRef = useRef(null);
 
   const toast = useCallback((msg) => {
     if (Platform.OS === 'android') ToastAndroid.show(msg, ToastAndroid.SHORT);
@@ -281,8 +358,17 @@ export default function MonitoringScreen() {
 
   const [showModal, setShowModal] = useState(false);
   const [modalPort, setModalPort] = useState(null);
-  const openPortModal = useCallback((p) => { setModalPort(p); setShowModal(true); }, []);
-  const closePortModal = useCallback(() => setShowModal(false), []);
+
+  // ✅ Hàm mở/đóng modal ĐẶT TRONG COMPONENT (đúng scope state)
+  const handleOpenPortModal = useCallback((port) => {
+    console.log('[Monitoring] OPEN DETAIL:', port?.id, port);
+    setModalPort(port || null);
+    setShowModal(Boolean(port));
+  }, []);
+  const handleClosePortModal = useCallback(() => {
+    console.log('[Monitoring] CLOSE DETAIL');
+    setShowModal(false);
+  }, []);
 
   // QR ref (trong modal)
   const qrRef = useRef(null);
@@ -390,7 +476,7 @@ export default function MonitoringScreen() {
           baseDeviceRef.current = uiBase;
           const uiApplied = applyLiveToUI(uiBase);
           setSelectedDevice(uiApplied);
-          saveDeviceUiToCache(deviceId, uiBase); // lưu base, không ghi đè overlay
+          saveDeviceUiToCache(deviceId, uiBase);
         } catch (e) {
           console.warn('loadDeviceDetail(SWR) error', e);
           !cached?.ui && toast(e?.message || t('errLoadDeviceInfo'));
@@ -426,7 +512,7 @@ export default function MonitoringScreen() {
     } finally { setRefreshing(false); }
   }, [loadDeviceList, loadDeviceDetail, selectedId]);
 
-  /* ======= SSE: parse & overlay live theo device_code ======= */
+  /* ======= SSE: parse & overlay ======= */
   const parseMaybeJson = (x) => {
     if (x && typeof x === 'object') return x;
     if (typeof x === 'string') {
@@ -441,13 +527,38 @@ export default function MonitoringScreen() {
   };
 
   const getSelectedDeviceCode = useCallback(() => {
-    // tìm code của thiết bị đang xem
     let code = baseDeviceRef.current?.code || selectedDevice?.code;
-    if (!code && selectedId && devicesMenu.length) {
-      // nothing — đợi fetch detail
-    }
+    if (!code && selectedId && devicesMenu.length) { /* đợi fetch detail */ }
     return code;
   }, [selectedDevice, selectedId, devicesMenu.length]);
+
+  function applyLiveToUI(ui) {
+    if (!ui?.code) return ui;
+    const entry = liveRef.current.get(ui.code);
+    if (!entry) return ui;
+
+    const isFresh = (Date.now() - entry.ts) <= LIVE_TTL_MS;
+    const next = { ...ui };
+
+    if (entry.status) {
+      next.deviceStatus = String(entry.status).toLowerCase();
+    }
+
+    if (isFresh && (typeof entry.powerKW === 'number' || typeof entry.energyKWh === 'number')) {
+      next.ports = (ui.ports || []).map(p => {
+        if (p?.visualStatus === 'charging') {
+          return {
+            ...p,
+            kw: (typeof entry.powerKW === 'number') ? entry.powerKW : p.kw,
+            kwh: (typeof entry.energyKWh === 'number') ? entry.energyKWh : p.kwh,
+          };
+        }
+        return p;
+      });
+    }
+
+    return next;
+  }
 
   useEffect(() => {
     const off = sseManager.on((evt) => {
@@ -457,29 +568,24 @@ export default function MonitoringScreen() {
       const obj = parseMaybeJson(data) || data;
       if (!obj) return;
 
-      // packetType có thể là number hoặc string
       const pt = toInt(obj?.packetType);
       const code = obj?.device_code || obj?.deviceCode || obj?.deviceID || obj?.deviceId || null;
 
       if (!code || !Number.isFinite(pt)) return;
 
-      // Lấy entry hiện tại để preserve fields
       const cur = liveRef.current.get(code) || {};
 
       if (pt === 1) {
-        // Power/Energy
-        // kw array ví dụ: [0.037, 0.02, 0]
         const arr = Array.isArray(obj?.kw) ? obj.kw : null;
         const powerKW = Number(arr?.[0]) || 0;
         const energyKWh = Number(arr?.[1]) || 0;
         liveRef.current.set(code, {
           powerKW,
           energyKWh,
-          status: cur.status, // giữ status nếu có
+          status: cur.status,
           ts: Date.now(),
         });
       } else if (pt === 2) {
-        // Status online/offline
         const st = normalize(obj?.status);
         const mapped = (st === 'offline') ? 'offline' : (st === 'online' ? 'online' : undefined);
         liveRef.current.set(code, {
@@ -489,11 +595,9 @@ export default function MonitoringScreen() {
           ts: Date.now(),
         });
       } else {
-        // các packet khác bỏ qua
         return;
       }
 
-      // Nếu đây là device đang mở → re-apply overlay để render ngay
       const showing = getSelectedDeviceCode();
       if (showing && showing === code && baseDeviceRef.current) {
         setSelectedDevice(applyLiveToUI(baseDeviceRef.current));
@@ -503,11 +607,10 @@ export default function MonitoringScreen() {
     return () => { try { off?.(); } catch {} };
   }, [getSelectedDeviceCode]);
 
-  // Tick mỗi 1s để TTL tự rớt overlay nếu hết hạn (khỏi phụ thuộc thêm SSE)
+  // Tick mỗi 1s để TTL tự rớt overlay nếu hết hạn
   useEffect(() => {
     const id = setInterval(() => {
       if (!baseDeviceRef.current) return;
-      // Re-apply sẽ tự bỏ overlay nếu hết TTL
       setSelectedDevice(applyLiveToUI(baseDeviceRef.current));
     }, 1000);
     return () => clearInterval(id);
@@ -534,24 +637,44 @@ export default function MonitoringScreen() {
   })();
 
   /* ===== helpers QR ===== */
+  const [modalPortState, setModalPortState] = useState(null); // giữ nguyên cho compat nếu cần
   const buildCheckoutUrl = useCallback((portNumber) => {
     const agentId = selectedDevice?.agentId || '';
     const deviceId = selectedDevice?.deviceId || '';
-    const p = portNumber ?? modalPort?.portNumber ?? '';
+    const p = portNumber ?? modalPort?.portNumber ?? modalPortState?.portNumber ?? '';
     return `https://ev-charging.iky.vn/checkout.html?agentId=${encodeURIComponent(agentId)}&deviceId=${encodeURIComponent(deviceId)}&port=${encodeURIComponent(p)}`;
-  }, [selectedDevice, modalPort]);
+  }, [selectedDevice, modalPort, modalPortState]);
 
   const openLink = useCallback(async (url) => {
     try { await Linking.openURL(url); } catch { toast(t('toastOpenLinkFail')); }
   }, [toast, t]);
 
   const saveQrPng = useCallback(async () => {
-    if (!modalPort) {
+    const portCtx = modalPort || modalPortState;
+    if (!portCtx) {
       toast(t('toastNoPort'));
       return;
     }
 
     try {
+      if (Platform.OS === 'web') {
+        if (!qrRef.current) { toast(t('toastQrNotReady')); return; }
+        qrRef.current.toDataURL((base64) => {
+          try {
+            const a = document.createElement('a');
+            a.href = 'data:image/png;base64,' + base64;
+            a.download = `qr_${selectedDevice?.code || 'device'}_port${portCtx.portNumber}.png`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          } catch (err) {
+            console.error(err);
+            toast('' + (err?.message || err));
+          }
+        });
+        return;
+      }
+
       // iOS permission placeholder
       if (Platform.OS === 'ios') {
         const permission = await PermissionsAndroid.request('ios.permission.PHOTO_LIBRARY_ADD_ONLY');
@@ -579,14 +702,14 @@ export default function MonitoringScreen() {
 
       qrRef.current.toDataURL(async (base64Data) => {
         try {
-          const fname = `qr_${selectedDevice?.code || 'device'}_port${modalPort.portNumber}_${Date.now()}.png`;
+          const fname = `qr_${selectedDevice?.code || 'device'}_port${portCtx.portNumber}_${Date.now()}.png`;
 
           // save temp
           const tempPath = `${RNFS.CachesDirectoryPath}/${fname}`;
           await RNFS.writeFile(tempPath, base64Data, 'base64');
 
           // save to Photos/Gallery
-          await CameraRoll.save(tempPath, { type: 'photo' });
+          await CameraRoll?.save(tempPath, { type: 'photo' });
 
           // cleanup
           await RNFS.unlink(tempPath).catch(() => {});
@@ -601,11 +724,10 @@ export default function MonitoringScreen() {
       console.error('saveQrPng error:', error);
       toast('' + (error?.message || error));
     }
-  }, [modalPort, selectedDevice, toast, t]);
+  }, [modalPort, modalPortState, selectedDevice, toast, t]);
 
   /* ===== UI ===== */
   const renderItem = useCallback(({ item }) => {
-    // Ưu tiên rule web qua visualStatus + deviceStatus
     const icon =
       selectedDevice?.deviceStatus === 'offline'
         ? plugOffline
@@ -616,36 +738,46 @@ export default function MonitoringScreen() {
     const portLabel = `${t('port')} ${item.name}`;
 
     return (
-      <TouchableOpacity activeOpacity={0.9} onPress={() => { setModalPort(item); setShowModal(true); }}>
-        <View style={[styles.portCard, { marginHorizontal: 16 }]}>
-          <Text style={styles.portTitle}>{t('portCardTitle', selectedDevice?.name, portLabel)}</Text>
+      <View style={[styles.portCard, { marginHorizontal: 16 }]}>
+        <Text style={styles.portTitle}>{t('portCardTitle', selectedDevice?.name, portLabel)}</Text>
 
-          <View style={styles.portStatusWrap}>
-            <View style={styles.portIconWrap}>
-              <Image source={icon} style={styles.portIcon} resizeMode="contain" />
-            </View>
-            <View>
-              <Text style={styles.portStatusLabel}>{t('status')}</Text>
-              <Text style={[styles.portStatusValue, { color: STATUS_COLOR[item.portTextStatus] || '#333' }]}>
-                {t(item.portTextStatus)}
-              </Text>
-            </View>
+        <View style={styles.portStatusWrap}>
+          <View style={styles.portIconWrap}>
+            <Image source={icon} style={styles.portIcon} resizeMode="contain" />
           </View>
-
-          <View style={styles.row}><Text style={styles.kv}>{t('start')}</Text><Text style={styles.v}>{item.start}</Text></View>
-          <View style={styles.row}><Text style={styles.kv}>{t('end')}</Text><Text style={styles.v}>{item.end}</Text></View>
-          <View style={styles.row}>
-            <Text style={styles.kv}>{t('power')}</Text>
-            <Text style={styles.v}>{formatPowerKW(item.kw)}</Text>
-          </View>
-          <View style={styles.row}>
-            <Text style={styles.kv}>{t('energy')}</Text>
-            <Text style={styles.v}>{formatEnergyKWh(item.kwh)}</Text>
+          <View>
+            <Text style={styles.portStatusLabel}>{t('status')}</Text>
+            <Text style={[styles.portStatusValue, { color: STATUS_COLOR[item.portTextStatus] || '#333' }]}>
+              {t(item.portTextStatus)}
+            </Text>
           </View>
         </View>
-      </TouchableOpacity>
+
+        <View style={styles.row}><Text style={styles.kv}>{t('start')}</Text><Text style={styles.v}>{item.start}</Text></View>
+        <View style={styles.row}><Text style={styles.kv}>{t('end')}</Text><Text style={styles.v}>{item.end}</Text></View>
+        <View style={styles.row}>
+          <Text style={styles.kv}>{t('power')}</Text>
+          <Text style={styles.v}>{formatPowerKW(item.kw)}</Text>
+        </View>
+        <View style={styles.row}>
+          <Text style={styles.kv}>{t('energy')}</Text>
+          <Text style={styles.v}>{formatEnergyKWh(item.kwh)}</Text>
+        </View>
+
+        {/* Actions */}
+        <View style={styles.cardActions}>
+          <TouchableOpacity
+            style={styles.btnDetail}
+            onPress={() => handleOpenPortModal(item)}
+            activeOpacity={0.85}
+          >
+            <Icon name="visibility" size={18} color="#2563EB" style={{ marginRight: 6 }} />
+            <Text style={styles.btnDetailText}>{t('viewDetail')}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     );
-  }, [selectedDevice, t]);
+  }, [selectedDevice, t, handleOpenPortModal]);
 
   const ListHeader = (
     <View style={{ paddingHorizontal: 16, paddingTop: 10 }}>
@@ -654,6 +786,12 @@ export default function MonitoringScreen() {
     </View>
   );
 
+  // Chọn component Modal theo platform
+  const ModalLike = Platform.OS === 'web' ? WebModal : Modal;
+  const modalProps = Platform.OS === 'web'
+    ? { visible: showModal, onRequestClose: handleClosePortModal }
+    : { visible: showModal, transparent: true, animationType: 'fade', onRequestClose: handleClosePortModal };
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -661,40 +799,48 @@ export default function MonitoringScreen() {
         <TouchableOpacity style={styles.menuButton} onPress={openDrawer}>
           <Icon name="menu" size={24} color="white" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{t('headerTitle', headerName)}</Text>
+        <Text style={styles.headerTitle}>{t('headerTitle', selectedDevice?.name || t('loading'))}</Text>
       </View>
 
       {/* Drawer */}
-      <View pointerEvents="box-none" style={{ position:'absolute', left:0, right:0, bottom:0, top:headerHeight, zIndex:9998 }}>
-        <EdgeDrawer visible={drawerOpen} onClose={closeDrawer}>
-          <View style={styles.drawerHeader}>
-            <View style={styles.drawerBadge}><Icon name="ev-station" size={16} color="#fff" /></View>
-            <Text style={styles.drawerTitle}>{t('devices')}</Text>
-          </View>
-          <View style={{ height: 8 }} />
-          <FlatList
-            data={devicesMenu}
-            keyExtractor={(x) => String(x.id)}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                onPress={() => { setSelectedId(item.id); closeDrawer(); }}
-                style={[styles.deviceMenuItem, selectedId === item.id && { borderColor: '#111827', backgroundColor: '#f7faff' }]}
-              >
-                <View style={styles.deviceMenuIcon}><Icon name="memory" size={16} color="#fff" /></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.deviceMenuName} numberOfLines={1}>{item.name}</Text>
-                  <Text style={styles.deviceMenuPorts}>{t('ports', item.portsCount)}</Text>
-                </View>
-                <Icon name="chevron-right" size={22} color="#9CA3AF" />
-              </TouchableOpacity>
-            )}
-            ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
-            contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }}
-            ListEmptyComponent={<Text style={{ color:'#6B7280', padding:16 }}>{t('loading')}</Text>}
-            showsVerticalScrollIndicator={false}
-          />
-        </EdgeDrawer>
-      </View>
+      {drawerOpen && (
+        <View
+          pointerEvents="box-none"
+          style={Platform.select({
+            web: { position:'fixed', left:0, right:0, bottom:0, top:headerHeight, zIndex:9998 },
+            default: { position:'absolute', left:0, right:0, bottom:0, top:headerHeight, zIndex:9998 },
+          })}
+        >
+          <EdgeDrawer visible onClose={closeDrawer}>
+            <View style={styles.drawerHeader}>
+              <View style={styles.drawerBadge}><Icon name="ev-station" size={16} color="#fff" /></View>
+              <Text style={styles.drawerTitle}>{t('devices')}</Text>
+            </View>
+            <View style={{ height: 8 }} />
+            <FlatList
+              data={devicesMenu}
+              keyExtractor={(x) => String(x.id)}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  onPress={() => { setSelectedId(item.id); closeDrawer(); }}
+                  style={[styles.deviceMenuItem, selectedId === item.id && { borderColor: '#111827', backgroundColor: '#f7faff' }]}
+                >
+                  <View style={styles.deviceMenuIcon}><Icon name="memory" size={16} color="#fff" /></View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.deviceMenuName} numberOfLines={1}>{item.name}</Text>
+                    <Text style={styles.deviceMenuPorts}>{t('ports', item.portsCount)}</Text>
+                  </View>
+                  <Icon name="chevron-right" size={22} color="#9CA3AF" />
+                </TouchableOpacity>
+              )}
+              ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
+              contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }}
+              ListEmptyComponent={<Text style={{ color:'#6B7280', padding:16 }}>{t('loading')}</Text>}
+              showsVerticalScrollIndicator={false}
+            />
+          </EdgeDrawer>
+        </View>
+      )}
 
       {/* Main list */}
       <View style={{ flex: 1 }}>
@@ -705,8 +851,10 @@ export default function MonitoringScreen() {
             ListHeaderComponent={ListHeader}
             renderItem={() => <PortCardSkeleton />}
             ItemSeparatorComponent={() => <View style={{ height: 0 }} />}
-            contentContainerStyle={{ paddingTop: 8, paddingBottom: 32 }}
+            contentContainerStyle={{ paddingTop: 8 }}
+            ListFooterComponent={FooterSpacer}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           />
         ) : (
           <FlatList
@@ -715,7 +863,8 @@ export default function MonitoringScreen() {
             ListHeaderComponent={ListHeader}
             renderItem={renderItem}
             ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-            contentContainerStyle={{ paddingTop: 8, paddingBottom: 32 }}
+            contentContainerStyle={{ paddingTop: 8 }}
+            ListFooterComponent={FooterSpacer}
             refreshing={refreshing}
             onRefresh={onRefresh}
             removeClippedSubviews={false}
@@ -724,112 +873,41 @@ export default function MonitoringScreen() {
             windowSize={10}
             onEndReachedThreshold={0.1}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           />
         )}
       </View>
 
-      {/* CENTER MODAL có QR */}
-      <Modal
-        visible={showModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={closePortModal}
-      >
-        <TouchableOpacity
-          activeOpacity={1}
-          style={styles.modalOverlay}
-          onPress={closePortModal}
-        >
-          <TouchableOpacity
-            activeOpacity={1}
-            style={styles.modalContainer}
-            onPress={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <View style={styles.modalHeader}>
-              <View style={styles.modalHeaderLeft}>
-                <View style={styles.modalIconBadge}>
-                  <Icon name="bolt" size={20} color="#fff" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.modalTitle}>{t('portDetail')}</Text>
-                  {!!modalPort && (
-                    <Text style={styles.modalSubtitle}>
-                      {headerName} • {t('port')} {modalPort?.name} • {t(modalPort?.portTextStatus)}
-                    </Text>
-                  )}
-                </View>
-              </View>
-              <TouchableOpacity onPress={closePortModal} style={styles.modalCloseBtn}>
-                <Icon name="close" size={24} color="#111827" />
-              </TouchableOpacity>
+      {/* MODAL / WEB-MODAL */}
+      <ModalLike {...modalProps}>
+        {Platform.OS === 'web' ? (
+          // WebModal đã có overlay + container
+          <ModalContent
+            t={t}
+            headerName={selectedDevice?.name || ''}
+            modalPort={modalPort}
+            buildCheckoutUrl={buildCheckoutUrl}
+            openLink={openLink}
+            saveQrPng={saveQrPng}
+            qrRef={qrRef}
+          />
+        ) : (
+          // Native: tự bọc overlay nền mờ
+          <Pressable style={styles.modalOverlay} onPress={handleClosePortModal}>
+            <View style={styles.modalContainer} onStartShouldSetResponder={() => true}>
+              <ModalContent
+                t={t}
+                headerName={selectedDevice?.name || ''}
+                modalPort={modalPort}
+                buildCheckoutUrl={buildCheckoutUrl}
+                openLink={openLink}
+                saveQrPng={saveQrPng}
+                qrRef={qrRef}
+              />
             </View>
-
-            {/* Content */}
-            {!!modalPort && (
-              <View style={styles.modalContent}>
-                <View style={styles.modalInfoCard}>
-                  {[
-                    ['Port', `${t('port')} ${modalPort.name}`],
-                    [t('status'), t(modalPort.portTextStatus)],
-                    [t('start'), modalPort.start],
-                    [t('end'), modalPort.end],
-                    [t('power'), formatPowerKW(modalPort.kw)],
-                    [t('energy'), formatEnergyKWh(modalPort.kwh)],
-                  ].map(([k, v, i]) => (
-                    <View key={k} style={[
-                      styles.modalInfoRow,
-                      i === 0 && { borderTopWidth: 0 }
-                    ]}>
-                      <Text style={styles.modalInfoKey}>{k}</Text>
-                      <Text style={styles.modalInfoValue}>{v}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                {/* ==== QR AREA ==== */}
-                <Text style={styles.qrHint}>{t('tapQRHint')}</Text>
-                <View style={styles.qrWrap}>
-                  <TouchableOpacity
-                    activeOpacity={0.9}
-                    onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
-                  >
-                    <View style={styles.qrBox}>
-                      <QRCode
-                        value={buildCheckoutUrl(modalPort.portNumber)}
-                        size={200}
-                        quietZone={10}
-                        getRef={(c) => { qrRef.current = c; }}
-                      />
-                    </View>
-                  </TouchableOpacity>
-
-                  <View style={styles.modalActions}>
-                    <TouchableOpacity
-                      style={[styles.btnPrimary, { flex: 1 }]}
-                      onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
-                    >
-                      <Icon name="open-in-new" size={18} color="#fff" style={{ marginRight: 6 }} />
-                      <Text style={styles.btnPrimaryText}>{t('openLink')}</Text>
-                    </TouchableOpacity>
-
-                    <View style={{ width: 10 }} />
-
-                    <TouchableOpacity
-                      style={[styles.btnGhost, { flex: 1 }]}
-                      onPress={saveQrPng}
-                    >
-                      <Icon name="file-download" size={18} color="#2563EB" style={{ marginRight: 6 }} />
-                      <Text style={styles.btnGhostText}>{t('saveQR')}</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-                {/* ==== /QR AREA ==== */}
-              </View>
-            )}
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
+          </Pressable>
+        )}
+      </ModalLike>
     </View>
   );
 }
@@ -873,6 +951,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff', borderRadius: 16, padding: 14,
     shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 }, elevation: 3,
+    marginBottom: 12,
   },
   portTitle: { fontSize: 15, fontWeight: '800', color: '#111827', marginBottom: 8 },
 
@@ -890,7 +969,27 @@ const styles = StyleSheet.create({
   kv: { fontSize: 13, color: '#6B7280' },
   v: { fontSize: 13, color: '#111827', fontWeight: '600' },
 
-  // CENTER MODAL STYLES
+  // Card actions
+  cardActions: {
+    marginTop: 10,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  btnDetail: {
+    borderWidth: 1,
+    borderColor: '#2563EB',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  btnDetailText: {
+    color: '#2563EB',
+    fontWeight: '800',
+  },
+
+  // Nền mờ cho native Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -898,6 +997,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
+
+  // Overlay tuyệt đối cho web (portal giả lập)
+  modalOverlayAbs: {
+    position: 'fixed',
+    inset: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 20,
+    zIndex: 2147483647, // max để khỏi bị layer khác đè
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
   modalContainer: {
     backgroundColor: '#fff',
     borderRadius: 20,
@@ -943,10 +1054,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#6B7280',
     marginTop: 2,
-  },
-  modalCloseBtn: {
-    padding: 8,
-    marginLeft: 8,
   },
   modalContent: {
     padding: 20,
@@ -1000,11 +1107,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  btnPrimaryText: { color: '#fff', fontWeight: '800' },
+  btnPrimaryText: { color: '#fff', fontWeight: '600',fontSize:14 },
 
   btnGhost: {
     borderWidth: 1, borderColor: '#2563EB', borderRadius: 12,
     paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center'
   },
-  btnGhostText: { color: '#2563EB', fontWeight: '800' },
+  btnGhostText: { color: '#2563EB', fontWeight: '600',fontSize:14 },
 });

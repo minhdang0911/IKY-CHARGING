@@ -444,7 +444,7 @@ export default function Extend({ navigateToScreen, screenData }) {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={goBack}>
-          <Icon name="arrow-back" size={24} color="#fff" />
+          <Text style={{fontSize: 30, color: '#fff'}}>{'‹'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Tạo đơn hàng</Text>
         <View style={{ width: 24 }} />

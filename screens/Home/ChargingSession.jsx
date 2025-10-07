@@ -184,7 +184,7 @@ export default function ChargingSession({ navigateToScreen }) {
           <Text style={styles.v}>{fmt(item?.endTime)}</Text>
         </View>
         <View style={styles.row}>
-          <Icon name="electric-bolt" size={18} color="#64748b" style={{ marginRight: 6 }} />
+          <Icon name="event" size={18} color="#64748b" style={{ marginRight: 6 }} />
           <Text style={styles.k}>Năng lượng</Text>
           <Text style={styles.v}>{(item?.energy_used_kwh ?? 0) + ' kWh'}</Text>
         </View>
@@ -197,7 +197,7 @@ export default function ChargingSession({ navigateToScreen }) {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={goBack} style={styles.backButton}>
-          <Icon name="arrow-back" size={24} color="white" />
+          <Text style={{fontSize: 30, color: '#fff'}}>{'‹'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Phiên sạc</Text>
         <View style={{ width: 24 }} />

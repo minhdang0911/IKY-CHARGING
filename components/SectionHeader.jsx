@@ -1,3 +1,4 @@
+// components/SectionHeader.jsx
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 
@@ -5,7 +6,9 @@ export default function SectionHeader({ title, right }) {
   return (
     <View style={s.row}>
       <Text style={s.title}>{title}</Text>
-      <View style={{flexDirection:'row', alignItems:'center', gap:8}}>{right}</View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        {right}
+      </View>
     </View>
   );
 }

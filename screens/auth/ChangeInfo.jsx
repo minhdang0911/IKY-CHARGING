@@ -77,7 +77,7 @@ const ChangeInfo = ({ navigateToScreen, navigation }) => {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
-            <Icon name="arrow-back" size={24} color="white" />
+           <Text style={{fontSize: 30, color: '#fff'}}>{'‹'}</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {t('headerTitle')}

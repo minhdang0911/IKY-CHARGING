@@ -2,13 +2,13 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput,
-  RefreshControl, Platform,
+  RefreshControl, Platform, useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getDevices, getExtendHistory } from '../../apis/devices';
 import { showMessage } from '../../components/Toast/Toast';
-import PortCardSkeleton from '../../components/Skeletons/PortCardSkeleton';  
+import PortCardSkeleton from '../../components/Skeletons/PortCardSkeleton';
 
 const LANG_KEY = 'app_language';
 const K_DEVICES = 'ev_devices_cache_v1';
@@ -63,7 +63,6 @@ const STATUS_COLOR = {
   idle: '#64748B',
 };
 
-// ---- sanitize sensors
 const saneTemp = (t) => {
   const n = Number(t);
   if (!Number.isFinite(n)) return null;
@@ -73,20 +72,20 @@ const saneTemp = (t) => {
 
 export default function DeviceList({ navigateToScreen }) {
   const mounted = useRef(true);
+  const { width: winW } = useWindowDimensions();
+  const isWide = Platform.OS === 'web' && winW >= 1024;  // ≥1024px: 2 cột
   const [lang, setLang] = useState('vi');
   const t = useCallback((k) => STRINGS[lang]?.[k] || k, [lang]);
 
-  const [raw, setRaw] = useState([]); // full list từ API
+  const [raw, setRaw] = useState([]);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
-
-  // 👇 NEW: loading lần đầu để show skeleton
   const [loading, setLoading] = useState(true);
 
-  // Front-end pagination
+  // Front-end pagination (chỉ áp dụng cho mobile/nhỏ)
   const [page, setPage] = useState(1);
-  const limit = 10;
+  const limit = isWide ? 99999 : 10; // web rộng: show hết (đã có 2 cột + scroll)
 
   useEffect(() => () => { mounted.current = false; }, []);
   useEffect(() => { (async()=>{ try{ const s=await AsyncStorage.getItem(LANG_KEY); if(s) setLang(s);}catch{} })(); }, []);
@@ -106,7 +105,7 @@ export default function DeviceList({ navigateToScreen }) {
     try {
       const token = await AsyncStorage.getItem('access_token');
       if (!token) return;
-      const data = await getDevices(token); // fetch full list
+      const data = await getDevices(token);
       const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
       if (!mounted.current) return;
       setRaw(list);
@@ -116,12 +115,11 @@ export default function DeviceList({ navigateToScreen }) {
     }
   }, []);
 
-  // 👇 chạy boot: load cache (nếu có) + fetch API rồi tắt loading để skeleton biến mất
   useEffect(() => {
     (async()=>{
       setLoading(true);
-      await loadCache();        // có cache thì hiện ngay data cũ (skeleton chỉ chớp nhẹ)
-      await fetchList(false);   // gọi API cập nhật
+      await loadCache();
+      await fetchList(false);
       if (mounted.current) setLoading(false);
     })();
   }, [loadCache, fetchList]);
@@ -132,41 +130,36 @@ export default function DeviceList({ navigateToScreen }) {
     setRefreshing(false);
   }, [fetchList]);
 
-  // Chuẩn hoá data
- const items = useMemo(() => {
-  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
-  return (raw || []).map((d) => {
-    const ports = Array.isArray(d?.ports) ? d.ports : [];
-    const lastHb = d?.lastHeartbeat ? new Date(d.lastHeartbeat) : null;
-    const _id = d?._id || d?.id || d?.device_id || d?.device_code;
+  const items = useMemo(() => {
+    const locale = lang === 'en' ? 'en-US' : 'vi-VN';
+    return (raw || []).map((d) => {
+      const ports = Array.isArray(d?.ports) ? d.ports : [];
+      const lastHb = d?.lastHeartbeat ? new Date(d.lastHeartbeat) : null;
+      const _id = d?._id || d?.id || d?.device_id || d?.device_code;
 
-    return {
-      _id,
-      id: _id,
-      code: d?.device_code || '—',
-      name: d?.name || '—',
-      location: d?.location || '',
-      status: (d?.status || '').toLowerCase(),
-      fw: d?.fw_version || '—',
-      ports: ports.map(p => ({ n: p.portNumber, status: (p.status||'').toLowerCase() })),
-      portsCount: ports.length,
-      lastHbStr: (lastHb && !isNaN(lastHb)) ? lastHb.toLocaleString(locale) : '—',
-      voltage: d?.voltage,
-      temp: saneTemp(d?.temperature),
-      createdAt: d?.createdAt ? new Date(d.createdAt) : null,   // 👈 thêm field này
-      raw: d,
-    };
-  })
-  // 👇 sort theo createdAt cũ → mới
-  .sort((a, b) => {
-    const ta = a.createdAt ? a.createdAt.getTime() : 0;
-    const tb = b.createdAt ? b.createdAt.getTime() : 0;
-    return ta - tb;
-  });
-}, [raw, lang]);
+      return {
+        _id,
+        id: _id,
+        code: d?.device_code || '—',
+        name: d?.name || '—',
+        location: d?.location || '',
+        status: (d?.status || '').toLowerCase(),
+        fw: d?.fw_version || '—',
+        ports: ports.map(p => ({ n: p.portNumber, status: (p.status||'').toLowerCase() })),
+        portsCount: ports.length,
+        lastHbStr: (lastHb && !isNaN(lastHb)) ? lastHb.toLocaleString(locale) : '—',
+        voltage: d?.voltage,
+        temp: saneTemp(d?.temperature),
+        createdAt: d?.createdAt ? new Date(d.createdAt) : null,
+        raw: d,
+      };
+    }).sort((a, b) => {
+      const ta = a.createdAt ? a.createdAt.getTime() : 0;
+      const tb = b.createdAt ? b.createdAt.getTime() : 0;
+      return tb - ta; // mới → cũ cho web
+    });
+  }, [raw, lang]);
 
-
-  // Filter
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter((it) => {
@@ -178,8 +171,7 @@ export default function DeviceList({ navigateToScreen }) {
     });
   }, [items, query, filter]);
 
-  // Phân trang
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(filtered.length / limit)), [filtered.length]);
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(filtered.length / limit)), [filtered.length, limit]);
   const pagedData = useMemo(() => {
     const start = (page - 1) * limit;
     return filtered.slice(start, start + limit);
@@ -218,7 +210,13 @@ export default function DeviceList({ navigateToScreen }) {
         activeOpacity={0.9}
       >
         {!!icon && (
-          <Icon name={icon} size={14} color={active ? '#fff' : '#3478F6'} style={{ marginRight: 6 }} />
+          <Icon
+  name={icon}
+  size={16}
+  color={active ? '#fff' : '#3478F6'}
+  style={{ marginRight: 6, marginTop: Platform.OS === 'web' ? 1 : 0 }}
+/>
+
         )}
         <Text style={[styles.chipText, active && styles.chipTextActive]} numberOfLines={1}>
           {label}
@@ -258,8 +256,9 @@ export default function DeviceList({ navigateToScreen }) {
         <Text style={styles.headerTitle}>{t('header')}</Text>
       </View>
 
-      {/* Search */}
-      <View style={styles.searchRow}>
+      {/* Sticky tool row */}
+      <View style={[styles.toolsSticky, Platform.OS === 'web' && styles.toolsStickyWeb]}>
+        {/* Search */}
         <View style={styles.searchBox}>
           <Icon name="search" size={20} color="#9DB7E8" />
           <TextInput
@@ -276,57 +275,59 @@ export default function DeviceList({ navigateToScreen }) {
             </TouchableOpacity>
           )}
         </View>
-      </View>
 
-      {/* Compact Filters */}
-      <View style={styles.filterWrap}>
-        <FilterChip val="all"      label={STRINGS[lang].filters.all}      icon="grid-view" />
-        <FilterChip val="online"   label={STRINGS[lang].filters.online}   icon="wifi" />
-        <FilterChip val="offline"  label={STRINGS[lang].filters.offline}  icon="signal-wifi-off" />
+        {/* Filters */}
+        <View style={styles.filterWrap}>
+          <FilterChip val="all"      label={STRINGS[lang].filters.all} />
+          <FilterChip val="online"   label={STRINGS[lang].filters.online} />
+          <FilterChip val="offline"  label={STRINGS[lang].filters.offline} />
+        </View>
       </View>
 
       {/* List */}
       <ScrollView
-        style={{flex:1}}
-        contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 22 }}
+        style={{ flex: 1 }}
+        contentContainerStyle={[
+          styles.listContent,
+          { paddingBottom: Platform.OS === 'web' ? 110 : 22 }, // chừa chỗ cho nav fixed
+          isWide && styles.listContentWide,
+        ]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
       >
-        {/* 👇 Nếu đang loading lần đầu → show 8 skeleton card */}
-        {loading && (
-          <>
-            {Array.from({ length: 8 }).map((_, i) => <PortCardSkeleton key={`sk-${i}`} />)}
-          </>
-        )}
+        {loading && Array.from({ length: isWide ? 10 : 8 }).map((_, i) => (
+          <View key={`sk-${i}`} style={[styles.card, isWide && styles.cardWide]}>
+            <PortCardSkeleton />
+          </View>
+        ))}
 
-        {/* Hết loading thì render list thực */}
         {!loading && pagedData.map((it) => {
           const offline = isDeviceOffline(it);
-
           return (
-            <View key={it.id} style={styles.card}>
+            <View key={it.id} style={[styles.card, isWide && styles.cardWide]}>
               <View style={styles.cardHead}>
                 {/* LEFT */}
-                <View style={{flex:1}}>
-                  <View style={{flexDirection:'row', alignItems:'center'}}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <View style={{ flexDirection:'row', alignItems:'center' }}>
                     <StatusDot s={it.status} />
                     <Text style={[styles.name, { marginLeft: 6 }]} numberOfLines={1}>{it.name}</Text>
                   </View>
-
-                  {/* Mã thiết bị (code) + vị trí */}
-                  <Text style={[styles.meta, { flexWrap: 'wrap', flexShrink: 1 }]}>
+                  <Text style={[styles.meta, { flexWrap:'wrap' }]}>
                     {t('deviceCode')}: <Text style={styles.bold}>{it.code}</Text>
                   </Text>
+                  {!!it.location && (
+                    <Text style={[styles.meta, { color:'#475569' }]} numberOfLines={1}>
+                      {it.location}
+                    </Text>
+                  )}
                 </View>
 
                 {/* RIGHT */}
                 <View style={styles.rightInfo}>
                   <Text style={styles.metaRight}>{t('ports')}: <Text style={styles.bold}>{it.portsCount}</Text></Text>
                   <Text style={styles.metaRight}>{t('fw')}: <Text style={styles.bold}>{it.fw}</Text></Text>
-                  <Text style={styles.metaRight}>{t('voltage')}: <Text style={styles.bold}>{it.voltage != null ? `${it.voltage} ` : '—'}</Text></Text>
-                  <Text style={styles.metaRight}>
-                    {t('temp')}: <Text style={styles.bold}>{it.raw?.temperature} °C</Text>
-                  </Text>
+                  <Text style={styles.metaRight}>{t('voltage')}: <Text style={styles.bold}>{it.voltage != null ? `${it.voltage}` : '—'}</Text></Text>
+                  <Text style={styles.metaRight}>{t('temp')}: <Text style={styles.bold}>{it.raw?.temperature} °C</Text></Text>
                 </View>
               </View>
 
@@ -362,13 +363,11 @@ export default function DeviceList({ navigateToScreen }) {
           );
         })}
 
-        {/* Khi KHÔNG loading và rỗng thật sự → hiện empty */}
         {!loading && filtered.length === 0 && (
           <Text style={{ textAlign:'center', color:'#64748B', marginTop: 28 }}>{t('empty')}</Text>
         )}
 
-        {/* Pagination Controls */}
-        {!loading && filtered.length > limit && (
+        {!isWide && !loading && filtered.length > limit && (
           <View style={styles.pagination}>
             <TouchableOpacity disabled={page <= 1} onPress={() => setPage(p => Math.max(1, p - 1))}>
               <Text style={[styles.pageBtn, page <= 1 && styles.pageBtnDisabled]}>Trước</Text>
@@ -389,11 +388,20 @@ const styles = StyleSheet.create({
 
   header: {
     backgroundColor:'#4A90E2',
-    paddingHorizontal:12, paddingTop: Platform.OS==='ios'? 12: 12, paddingBottom:12,
+    paddingHorizontal:20, paddingTop: 12, paddingBottom:12,
   },
   headerTitle: { color:'#fff', fontSize:20, fontWeight:'800' },
 
-  searchRow: { padding:14, paddingBottom:8 },
+  /* sticky tool row cho web */
+  toolsSticky: { paddingHorizontal:14, paddingTop:10, paddingBottom:8, gap:8, backgroundColor:'#F6F7FB' },
+  toolsStickyWeb: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E6EEF9',
+  },
+
   searchBox: {
     flexDirection:'row', alignItems:'center',
     backgroundColor:'#E9F2FF', borderRadius:12, paddingHorizontal:12, height:44,
@@ -402,35 +410,54 @@ const styles = StyleSheet.create({
   searchInput: { flex:1, fontSize:15, color:'#0F172A' },
 
   filterWrap: {
-    paddingHorizontal: 14,
-    paddingBottom: 8,
+    flexDirection:'row', flexWrap:'wrap', columnGap:8, rowGap:8,
+  },
+ chip: {
+  height: 36,
+  paddingHorizontal: 12,
+  borderRadius: 10,
+  borderWidth: 1,
+  borderColor: '#CFE0FF',
+  backgroundColor: '#F3F7FF',
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',        // ✅ canh icon + text giữa đều
+  gap: 6,                          // ✅ khoảng cách đồng nhất icon–text
+},
+chipActive: { backgroundColor: '#4A90E2', borderColor: '#4A90E2' },
+chipText: {
+  color: '#3478F6',
+  fontWeight: '700',
+  fontSize: 13,
+  lineHeight: 16,                  // ✅ để text không bị lệch
+  position: 'relative',
+  top: Platform.OS === 'web' ? 1 : 0, // ✅ đẩy text nhẹ xuống trên web
+},
+chipTextActive: { color: '#fff' },
+
+
+  /* list grid */
+  listContent: { paddingHorizontal:14, paddingTop:12, gap:12 },
+  listContentWide: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    columnGap: 8,
-    rowGap: 8,
+    columnGap: 12,
+    rowGap: 12,
+    alignItems: 'stretch',
   },
-  chip: {
-    height: 34,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#CFE0FF',
-    backgroundColor: '#F3F7FF',
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  chipActive: { backgroundColor: '#4A90E2', borderColor: '#4A90E2' },
-  chipText: { color: '#3478F6', fontWeight: '700', fontSize: 12, maxWidth: 110 },
-  chipTextActive: { color: '#fff' },
 
   card: {
-    backgroundColor:'#fff', borderRadius:16, padding:14, marginBottom:12,
-    borderWidth:1, borderColor:'#E6EEF9',
+    backgroundColor:'#fff', borderRadius:16, padding:14, borderWidth:1, borderColor:'#E6EEF9',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
   },
-  cardHead: { flexDirection:'row', gap:12 },
-  rightInfo: { minWidth: 170, alignItems:'flex-end' },
+  cardWide: {
+    width: 'calc(50% - 6px)', // RN Web hiểu calc trong inline style
+  },
 
-  name: { fontSize:16, fontWeight:'800', color:'#0F172A' },
+  cardHead: { flexDirection:'row', gap:12 },
+  rightInfo: { minWidth: 160, alignItems:'flex-end' },
+
+  name: { fontSize:16, fontWeight:'800', color:'#0F172A', minWidth: 0, flexShrink: 1 },
   meta: { fontSize:12, color:'#6B7280', marginTop:2 },
   metaRight: { fontSize:12, color:'#6B7280' },
   bold: { color:'#0F172A', fontWeight:'800' },
@@ -450,11 +477,7 @@ const styles = StyleSheet.create({
   },
   actionText: { color:'#2563EB', fontWeight:'800' },
 
-  actionBtnDisabled: {
-    opacity: 0.45,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#F3F4F6',
-  },
+  actionBtnDisabled: { opacity: 0.45, borderColor: '#E5E7EB', backgroundColor: '#F3F4F6' },
   actionTextDisabled: { color: '#9CA3AF' },
 
   pagination: {

@@ -6,7 +6,7 @@ export default function SimpleHeader({ title, onBack, rightSlot, color = '#1e88e
   return (
     <View style={[styles.header, { backgroundColor: color }]}>
       <TouchableOpacity onPress={onBack} style={styles.backBtn}>
-        <Icon name="arrow-back" size={24} color="#fff" />
+        <Text style={{fontSize: 30, color: '#fff'}}>{'‹'}</Text>
       </TouchableOpacity>
       <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
       <View style={{ width: 32 }}>{rightSlot}</View>
