@@ -163,6 +163,22 @@ const K_MONI_SELECTED_ID  = 'moni_selected_id';
 const K_MONI_DEVICE_MAP   = 'moni_device_map';
 const SWR_MAX_AGE_MS = 60 * 1000;
 
+/* ====== LIVE overlay config ====== */
+const LIVE_TTL_MS = 10 * 1000;        // TTL overlay
+const ZERO_TO_READY_SEC = 0;          // nếu backend không bắn pt=3, set >0 để auto ready khi kw=0 liên tục Xs
+
+// Map<device_code, { status?:'online'|'offline', ts:number, ports: Map<number, {portStatus?:string, powerKW?:number, energyKWh?:number, end?:string, zeroSince?:number, ts:number}> }>
+const liveRef = { current: new Map() };
+
+function mapPortStatusToVisual(s) {
+  const x = normalize(s);
+  if (x === 'offline') return 'offline';
+  if (['fault','error','unavailable'].includes(x)) return 'fault';
+  if (['busy','charging','running','in_progress','active'].includes(x)) return 'charging';
+  if (['idle','ready','completed','finish','finished'].includes(x)) return 'ready';
+  return undefined;
+}
+
 /* ====== ADAPTER ====== */
 function adaptDeviceInfoToUI(info, sessionsDev, lang) {
   const name = info?.name || info?.device_code || '—';
@@ -224,11 +240,42 @@ function adaptDeviceInfoToUI(info, sessionsDev, lang) {
   };
 }
 
-/* ========= LIVE OVERLAY by SSE ========= */
-const LIVE_TTL_MS = 10 * 1000;
+/* ========= APPLY LIVE OVERLAY ========= */
+function applyLiveToUI(ui) {
+  if (!ui?.code) return ui;
+  const dev = liveRef.current.get(ui.code);
+  if (!dev) return ui;
 
-// Map<device_code, { powerKW?:number, energyKWh?:number, status?:'online'|'offline', ts:number }>
-const liveRef = { current: new Map() };
+  const next = { ...ui };
+  if (dev.status) next.deviceStatus = dev.status;
+
+  next.ports = (ui.ports || []).map((p) => {
+    const portMap = dev.ports || new Map();
+    const liveP = portMap.get(p.portNumber);
+    if (!liveP) return p;
+
+    const fresh = (Date.now() - liveP.ts) <= LIVE_TTL_MS;
+
+    let visual = p.visualStatus;
+    let text   = p.portTextStatus;
+
+    if (liveP.portStatus) {
+      const mapped = mapPortStatusToVisual(liveP.portStatus);
+      if (mapped) { visual = mapped; text = mapped; }
+    }
+
+    return {
+      ...p,
+      visualStatus: visual,
+      portTextStatus: text,
+      kw:    fresh && typeof liveP.powerKW === 'number'   ? liveP.powerKW   : p.kw,
+      kwh:   fresh && typeof liveP.energyKWh === 'number' ? liveP.energyKWh : p.kwh,
+      end:   fresh && liveP.end ? liveP.end : p.end,
+    };
+  });
+
+  return next;
+}
 
 /* ========= WebModal (giả lập Modal trên web) ========= */
 function WebModal({ visible, onRequestClose, children }) {
@@ -510,7 +557,7 @@ export default function MonitoringScreen() {
     } finally { setRefreshing(false); }
   }, [loadDeviceList, loadDeviceDetail, selectedId]);
 
-  /* ======= SSE: parse & overlay ======= */
+  /* ======= SSE: parse & overlay (per-port + pt:3) ======= */
   const parseMaybeJson = (x) => {
     if (x && typeof x === 'object') return x;
     if (typeof x === 'string') {
@@ -530,72 +577,68 @@ export default function MonitoringScreen() {
     return code;
   }, [selectedDevice, selectedId, devicesMenu.length]);
 
-  function applyLiveToUI(ui) {
-    if (!ui?.code) return ui;
-    const entry = liveRef.current.get(ui.code);
-    if (!entry) return ui;
-
-    const isFresh = (Date.now() - entry.ts) <= LIVE_TTL_MS;
-    const next = { ...ui };
-
-    if (entry.status) {
-      next.deviceStatus = String(entry.status).toLowerCase();
-    }
-
-    if (isFresh && (typeof entry.powerKW === 'number' || typeof entry.energyKWh === 'number')) {
-      next.ports = (ui.ports || []).map(p => {
-        if (p?.visualStatus === 'charging') {
-          return {
-            ...p,
-            kw: (typeof entry.powerKW === 'number') ? entry.powerKW : p.kw,
-            kwh: (typeof entry.energyKWh === 'number') ? entry.energyKWh : p.kwh,
-          };
-        }
-        return p;
-      });
-    }
-
-    return next;
-  }
-
   useEffect(() => {
     const off = sseManager.on((evt) => {
       if (evt?.type !== 'message') return;
 
-      let data = evt.data;
-      const obj = parseMaybeJson(data) || data;
-      if (!obj) return;
-
+      const obj = parseMaybeJson(evt.data) || evt.data;
       const pt = toInt(obj?.packetType);
       const code = obj?.device_code || obj?.deviceCode || obj?.deviceID || obj?.deviceId || null;
-
       if (!code || !Number.isFinite(pt)) return;
 
-      const cur = liveRef.current.get(code) || {};
+      const now = Date.now();
+      const dev = liveRef.current.get(code) || { ports: new Map(), ts: now };
 
       if (pt === 1) {
+        // power/energy (tổng hoặc theo port)
         const arr = Array.isArray(obj?.kw) ? obj.kw : null;
-        const powerKW = Number(arr?.[0]) || 0;
+        const powerKW   = Number(arr?.[0]) || 0;
         const energyKWh = Number(arr?.[1]) || 0;
-        liveRef.current.set(code, {
-          powerKW,
-          energyKWh,
-          status: cur.status,
-          ts: Date.now(),
-        });
+
+        const pn = toInt(obj?.portNumber);
+        if (Number.isFinite(pn)) {
+          const cur = dev.ports.get(pn) || {};
+          dev.ports.set(pn, {
+            ...cur,
+            powerKW,
+            energyKWh,
+            zeroSince: (powerKW === 0 ? (cur.zeroSince || now) : undefined),
+            ts: now,
+          });
+        }
+        dev.ts = now;
+        liveRef.current.set(code, dev);
+
       } else if (pt === 2) {
+        // online/offline device
         const st = normalize(obj?.status);
-        const mapped = (st === 'offline') ? 'offline' : (st === 'online' ? 'online' : undefined);
-        liveRef.current.set(code, {
-          powerKW: cur.powerKW,
-          energyKWh: cur.energyKWh,
-          status: mapped,
-          ts: Date.now(),
-        });
+        dev.status = (st === 'offline') ? 'offline' : 'online';
+        dev.ts = now;
+        liveRef.current.set(code, dev);
+
+      } else if (pt === 3) {
+        // completed / status cổng
+        const pn = toInt(obj?.portNumber);
+        if (Number.isFinite(pn)) {
+          const cur = dev.ports.get(pn) || {};
+          const mapped = mapPortStatusToVisual(obj?.portStatus) || 'ready';
+          dev.ports.set(pn, {
+            ...cur,
+            portStatus: mapped,                  // flip về ready ngay
+            energyKWh: Number(obj?.kwh) || cur.energyKWh,
+            end: obj?.endTime || cur.end,
+            powerKW: 0,
+            zeroSince: now,
+            ts: now,
+          });
+          dev.ts = now;
+          liveRef.current.set(code, dev);
+        }
       } else {
         return;
       }
 
+      // render ngay nếu đang xem đúng device
       const showing = getSelectedDeviceCode();
       if (showing && showing === code && baseDeviceRef.current) {
         setSelectedDevice(applyLiveToUI(baseDeviceRef.current));
@@ -605,11 +648,25 @@ export default function MonitoringScreen() {
     return () => { try { off?.(); } catch {} };
   }, [getSelectedDeviceCode]);
 
-  // Tick mỗi 1s để TTL tự rớt overlay nếu hết hạn
+  // Tick mỗi 1s để TTL tự rơi overlay, và (tuỳ chọn) auto-ready khi kw=0 đủ lâu
   useEffect(() => {
     const id = setInterval(() => {
-      if (!baseDeviceRef.current) return;
-      setSelectedDevice(applyLiveToUI(baseDeviceRef.current));
+      const base = baseDeviceRef.current;
+      if (!base) return;
+
+      if (ZERO_TO_READY_SEC > 0) {
+        const dev = liveRef.current.get(base.code);
+        const now = Date.now();
+        if (dev?.ports) {
+          for (const [pn, cur] of dev.ports.entries()) {
+            if (cur?.powerKW === 0 && cur?.zeroSince && (now - cur.zeroSince >= ZERO_TO_READY_SEC * 1000)) {
+              dev.ports.set(pn, { ...cur, portStatus: 'ready', ts: now });
+            }
+          }
+        }
+      }
+
+      setSelectedDevice(applyLiveToUI(base));
     }, 1000);
     return () => clearInterval(id);
   }, []);
@@ -635,7 +692,7 @@ export default function MonitoringScreen() {
   })();
 
   /* ===== helpers QR ===== */
-  const [modalPortState, setModalPortState] = useState(null); // giữ cho compat (nếu bạn dùng chỗ khác)
+  const [modalPortState, setModalPortState] = useState(null); // (nếu m dùng chỗ khác)
   const buildCheckoutUrl = useCallback((portNumber) => {
     const agentId = selectedDevice?.agentId || '';
     const deviceId = selectedDevice?.deviceId || '';
@@ -675,7 +732,7 @@ export default function MonitoringScreen() {
       return;
     }
 
-    // ⚡ Native: dùng toDataURL + RNFS + CameraRoll
+    // ⚡ Native
     try {
       if (!qrRef.current) { toast(t('toastQrNotReady')); return; }
 
@@ -865,7 +922,6 @@ export default function MonitoringScreen() {
       {/* MODAL / WEB-MODAL */}
       <ModalLike {...modalProps}>
         {Platform.OS === 'web' ? (
-          // WebModal đã có overlay + container + ScrollView
           <ModalContent
             t={t}
             headerName={selectedDevice?.name || ''}
@@ -876,7 +932,6 @@ export default function MonitoringScreen() {
             qrRef={qrRef}
           />
         ) : (
-          // Native: bọc ScrollView để cuộn
           <Pressable style={styles.modalOverlay} onPress={handleClosePortModal}>
             <View style={styles.modalContainer} onStartShouldSetResponder={() => true}>
               <ScrollView
