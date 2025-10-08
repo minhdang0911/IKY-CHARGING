@@ -53,8 +53,8 @@ const K_USERNAME = 'username';
 const K_USER_OID = 'user_oid';
 
 // ===== Auto refresh 2 phút =====
-const LOOP_MS = 30 * 60 * 1000; 
-const MIN_GAP_MS = 5 * 60 * 1000;
+const LOOP_MS = 40 * 60 * 1000; 
+const MIN_GAP_MS = 30 * 60 * 1000;
 
 let refreshTimer = null;
 let refreshInFlight = null;
