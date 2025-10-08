@@ -154,6 +154,22 @@ const K_MONI_SELECTED_ID  = 'moni_selected_id';
 const K_MONI_DEVICE_MAP   = 'moni_device_map';
 const SWR_MAX_AGE_MS = 60 * 1000;
 
+/* ====== LIVE overlay config ====== */
+const LIVE_TTL_MS = 10 * 1000;        // TTL overlay
+const ZERO_TO_READY_SEC = 0;          // nếu backend không bắn pt=3, set >0 để auto ready khi kw=0 liên tục Xs
+
+// Map<device_code, { status?:'online'|'offline', ts:number, ports: Map<number, {portStatus?:string, powerKW?:number, energyKWh?:number, end?:string, zeroSince?:number, ts:number}> }>
+const liveRef = { current: new Map() };
+
+function mapPortStatusToVisual(s) {
+  const x = normalize(s);
+  if (x === 'offline') return 'offline';
+  if (['fault','error','unavailable'].includes(x)) return 'fault';
+  if (['busy','charging','running','in_progress','active'].includes(x)) return 'charging';
+  if (['idle','ready','completed','finish','finished'].includes(x)) return 'ready';
+  return undefined;
+}
+
 /* ====== ADAPTER (web rule) ====== */
 function adaptDeviceInfoToUI(info, sessionsDev, lang) {
   const name = info?.name || info?.device_code || '—';
@@ -215,42 +231,39 @@ function adaptDeviceInfoToUI(info, sessionsDev, lang) {
   };
 }
 
-/* ========= LIVE OVERLAY by SSE (ưu tiên SSE) ========= */
-// TTL cho bản tin SSE; hết TTL thì trả về giá trị API
-const LIVE_TTL_MS = 10 * 1000;
-
-// Map<device_code, { powerKW?:number, energyKWh?:number, status?:'online'|'offline', ts:number }>
-const liveRef = { current: new Map() };
-
-// base UI (từ API/cache). Ta render = applyLiveToUI(base)
- 
-
+/* ========= APPLY LIVE OVERLAY ========= */
 function applyLiveToUI(ui) {
   if (!ui?.code) return ui;
-  const entry = liveRef.current.get(ui.code);
-  if (!entry) return ui;
+  const dev = liveRef.current.get(ui.code);
+  if (!dev) return ui;
 
-  const isFresh = (Date.now() - entry.ts) <= LIVE_TTL_MS;
   const next = { ...ui };
+  if (dev.status) next.deviceStatus = dev.status;
 
-  // overlay trạng thái nếu có packetType:2
-  if (entry.status) {
-    next.deviceStatus = String(entry.status).toLowerCase(); // 'online'|'offline'
-  }
+  next.ports = (ui.ports || []).map((p) => {
+    const portMap = dev.ports || new Map();
+    const liveP = portMap.get(p.portNumber);
+    if (!liveP) return p;
 
-  // overlay power/energy nếu còn fresh
-  if (isFresh && (typeof entry.powerKW === 'number' || typeof entry.energyKWh === 'number')) {
-    next.ports = (ui.ports || []).map(p => {
-      if (p?.visualStatus === 'charging') {
-        return {
-          ...p,
-          kw: (typeof entry.powerKW === 'number') ? entry.powerKW : p.kw,
-          kwh: (typeof entry.energyKWh === 'number') ? entry.energyKWh : p.kwh,
-        };
-      }
-      return p;
-    });
-  }
+    const fresh = (Date.now() - liveP.ts) <= LIVE_TTL_MS;
+
+    let visual = p.visualStatus;
+    let text   = p.portTextStatus;
+
+    if (liveP.portStatus) {
+      const mapped = mapPortStatusToVisual(liveP.portStatus);
+      if (mapped) { visual = mapped; text = mapped; }
+    }
+
+    return {
+      ...p,
+      visualStatus: visual,
+      portTextStatus: text,
+      kw:    fresh && typeof liveP.powerKW === 'number'   ? liveP.powerKW   : p.kw,
+      kwh:   fresh && typeof liveP.energyKWh === 'number' ? liveP.energyKWh : p.kwh,
+      end:   fresh && liveP.end ? liveP.end : p.end,
+    };
+  });
 
   return next;
 }
@@ -271,8 +284,7 @@ export default function MonitoringScreen() {
   const [loadingList, setLoadingList] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-    const baseDeviceRef = useRef(null);
-
+  const baseDeviceRef = useRef(null);
 
   const toast = useCallback((msg) => {
     if (Platform.OS === 'android') ToastAndroid.show(msg, ToastAndroid.SHORT);
@@ -284,7 +296,6 @@ export default function MonitoringScreen() {
   const openPortModal = useCallback((p) => { setModalPort(p); setShowModal(true); }, []);
   const closePortModal = useCallback(() => setShowModal(false), []);
 
-  // QR ref (trong modal)
   const qrRef = useRef(null);
 
   /* ====== SWR: hydrate cache ====== */
@@ -390,7 +401,7 @@ export default function MonitoringScreen() {
           baseDeviceRef.current = uiBase;
           const uiApplied = applyLiveToUI(uiBase);
           setSelectedDevice(uiApplied);
-          saveDeviceUiToCache(deviceId, uiBase); // lưu base, không ghi đè overlay
+          saveDeviceUiToCache(deviceId, uiBase);
         } catch (e) {
           console.warn('loadDeviceDetail(SWR) error', e);
           !cached?.ui && toast(e?.message || t('errLoadDeviceInfo'));
@@ -426,7 +437,7 @@ export default function MonitoringScreen() {
     } finally { setRefreshing(false); }
   }, [loadDeviceList, loadDeviceDetail, selectedId]);
 
-  /* ======= SSE: parse & overlay live theo device_code ======= */
+  /* ======= SSE: parse & overlay live theo device_code + port ======= */
   const parseMaybeJson = (x) => {
     if (x && typeof x === 'object') return x;
     if (typeof x === 'string') {
@@ -441,59 +452,75 @@ export default function MonitoringScreen() {
   };
 
   const getSelectedDeviceCode = useCallback(() => {
-    // tìm code của thiết bị đang xem
     let code = baseDeviceRef.current?.code || selectedDevice?.code;
-    if (!code && selectedId && devicesMenu.length) {
-      // nothing — đợi fetch detail
-    }
     return code;
-  }, [selectedDevice, selectedId, devicesMenu.length]);
+  }, [selectedDevice]);
 
   useEffect(() => {
     const off = sseManager.on((evt) => {
       if (evt?.type !== 'message') return;
 
-      let data = evt.data;
-      const obj = parseMaybeJson(data) || data;
-      if (!obj) return;
-
-      // packetType có thể là number hoặc string
+      const obj = parseMaybeJson(evt.data) || evt.data;
       const pt = toInt(obj?.packetType);
-      const code = obj?.device_code || obj?.deviceCode || obj?.deviceID || obj?.deviceId || null;
-
+      const code = obj?.device_code || obj?.deviceCode || obj?.deviceID || obj?.deviceId;
       if (!code || !Number.isFinite(pt)) return;
 
-      // Lấy entry hiện tại để preserve fields
-      const cur = liveRef.current.get(code) || {};
+      const now = Date.now();
+      const dev = liveRef.current.get(code) || { ports: new Map(), ts: now };
 
       if (pt === 1) {
-        // Power/Energy
-        // kw array ví dụ: [0.037, 0.02, 0]
+        // power/energy (tổng hoặc theo port)
         const arr = Array.isArray(obj?.kw) ? obj.kw : null;
-        const powerKW = Number(arr?.[0]) || 0;
+        const powerKW   = Number(arr?.[0]) || 0;
         const energyKWh = Number(arr?.[1]) || 0;
-        liveRef.current.set(code, {
-          powerKW,
-          energyKWh,
-          status: cur.status, // giữ status nếu có
-          ts: Date.now(),
-        });
+
+        const pn = toInt(obj?.portNumber);
+        if (Number.isFinite(pn)) {
+          const cur = dev.ports.get(pn) || {};
+          dev.ports.set(pn, {
+            ...cur,
+            powerKW,
+            energyKWh,
+            // nếu power về 0 thì đánh dấu thời điểm về 0 (để optional auto-ready)
+            zeroSince: (powerKW === 0 ? (cur.zeroSince || now) : undefined),
+            ts: now,
+          });
+        } else {
+          // không có portNumber -> bỏ qua hoặc tùy logic của m (ở đây bỏ qua để tránh ghi đè sai cổng)
+        }
+        dev.ts = now;
+        liveRef.current.set(code, dev);
+
       } else if (pt === 2) {
-        // Status online/offline
+        // online/offline device
         const st = normalize(obj?.status);
-        const mapped = (st === 'offline') ? 'offline' : (st === 'online' ? 'online' : undefined);
-        liveRef.current.set(code, {
-          powerKW: cur.powerKW,
-          energyKWh: cur.energyKWh,
-          status: mapped,
-          ts: Date.now(),
-        });
+        dev.status = (st === 'offline') ? 'offline' : 'online';
+        dev.ts = now;
+        liveRef.current.set(code, dev);
+
+      } else if (pt === 3) {
+        // completed / status cổng
+        const pn = toInt(obj?.portNumber);
+        if (Number.isFinite(pn)) {
+          const cur = dev.ports.get(pn) || {};
+          const mapped = mapPortStatusToVisual(obj?.portStatus) || 'ready';
+          dev.ports.set(pn, {
+            ...cur,
+            portStatus: mapped,                  // flip về ready ngay
+            energyKWh: Number(obj?.kwh) || cur.energyKWh,
+            end: obj?.endTime || cur.end,
+            powerKW: 0,
+            zeroSince: now,
+            ts: now,
+          });
+          dev.ts = now;
+          liveRef.current.set(code, dev);
+        }
       } else {
-        // các packet khác bỏ qua
         return;
       }
 
-      // Nếu đây là device đang mở → re-apply overlay để render ngay
+      // Re-render nếu đang xem đúng device
       const showing = getSelectedDeviceCode();
       if (showing && showing === code && baseDeviceRef.current) {
         setSelectedDevice(applyLiveToUI(baseDeviceRef.current));
@@ -503,12 +530,30 @@ export default function MonitoringScreen() {
     return () => { try { off?.(); } catch {} };
   }, [getSelectedDeviceCode]);
 
-  // Tick mỗi 1s để TTL tự rớt overlay nếu hết hạn (khỏi phụ thuộc thêm SSE)
+  // Tick mỗi 1s để TTL tự rơi overlay, và (tuỳ chọn) auto-ready khi kw=0 đủ lâu
   useEffect(() => {
     const id = setInterval(() => {
-      if (!baseDeviceRef.current) return;
-      // Re-apply sẽ tự bỏ overlay nếu hết TTL
-      setSelectedDevice(applyLiveToUI(baseDeviceRef.current));
+      const base = baseDeviceRef.current;
+      if (!base) return;
+
+      if (ZERO_TO_READY_SEC > 0) {
+        const dev = liveRef.current.get(base.code);
+        const now = Date.now();
+        if (dev?.ports) {
+          for (const [pn, cur] of dev.ports.entries()) {
+            if (cur?.powerKW === 0 && cur?.zeroSince && (now - cur.zeroSince >= ZERO_TO_READY_SEC * 1000)) {
+              // nếu backend không gửi pt=3 thì ép về ready
+              dev.ports.set(pn, {
+                ...cur,
+                portStatus: 'ready',
+                ts: now,
+              });
+            }
+          }
+        }
+      }
+
+      setSelectedDevice(applyLiveToUI(base));
     }, 1000);
     return () => clearInterval(id);
   }, []);
@@ -581,14 +626,11 @@ export default function MonitoringScreen() {
         try {
           const fname = `qr_${selectedDevice?.code || 'device'}_port${modalPort.portNumber}_${Date.now()}.png`;
 
-          // save temp
           const tempPath = `${RNFS.CachesDirectoryPath}/${fname}`;
           await RNFS.writeFile(tempPath, base64Data, 'base64');
 
-          // save to Photos/Gallery
           await CameraRoll.save(tempPath, { type: 'photo' });
 
-          // cleanup
           await RNFS.unlink(tempPath).catch(() => {});
 
           toast(t('toastSaved'));
@@ -605,13 +647,12 @@ export default function MonitoringScreen() {
 
   /* ===== UI ===== */
   const renderItem = useCallback(({ item }) => {
-    // Ưu tiên rule web qua visualStatus + deviceStatus
     const icon =
       selectedDevice?.deviceStatus === 'offline'
         ? plugOffline
         : (item.visualStatus === 'charging'
             ? plugCharging
-            : (item.visualStatus === 'ready' ? plugOnline : plugOffline)); // 'fault' -> tạm dùng offline icon
+            : (item.visualStatus === 'ready' ? plugOnline : plugOffline));
 
     const portLabel = `${t('port')} ${item.name}`;
 
@@ -668,7 +709,7 @@ export default function MonitoringScreen() {
       <View pointerEvents="box-none" style={{ position:'absolute', left:0, right:0, bottom:0, top:headerHeight, zIndex:9998 }}>
         <EdgeDrawer visible={drawerOpen} onClose={closeDrawer}>
           <View style={styles.drawerHeader}>
-            <View style={styles.drawerBadge}><Icon name="ev-station" size={16} color="#fff" /></View>
+            <View className="drawerBadge" style={styles.drawerBadge}><Icon name="ev-station" size={16} color="#fff" /></View>
             <Text style={styles.drawerTitle}>{t('devices')}</Text>
           </View>
           <View style={{ height: 8 }} />
@@ -776,11 +817,8 @@ export default function MonitoringScreen() {
                     [t('end'), modalPort.end],
                     [t('power'), formatPowerKW(modalPort.kw)],
                     [t('energy'), formatEnergyKWh(modalPort.kwh)],
-                  ].map(([k, v, i]) => (
-                    <View key={k} style={[
-                      styles.modalInfoRow,
-                      i === 0 && { borderTopWidth: 0 }
-                    ]}>
+                  ].map(([k, v], i) => (
+                    <View key={k} style={[styles.modalInfoRow, i === 0 && { borderTopWidth: 0 }]}>
                       <Text style={styles.modalInfoKey}>{k}</Text>
                       <Text style={styles.modalInfoValue}>{v}</Text>
                     </View>
