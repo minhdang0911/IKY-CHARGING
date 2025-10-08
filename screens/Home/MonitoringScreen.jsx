@@ -1,14 +1,15 @@
 // screens/Home/MonitoringScreen.jsx
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, FlatList, Platform,
-  ToastAndroid, Alert, Image, Modal, PermissionsAndroid, Linking, ScrollView
+  View, Text, StyleSheet, TouchableOpacity,
+  FlatList, Platform, ToastAndroid, Alert, Image, Modal,
+  PermissionsAndroid, Linking
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import QRCode from 'react-native-qrcode-svg';
-
-// ===== WEB ONLY: không dùng RNFS / CameraRoll =====
+import RNFS from 'react-native-fs';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 
 // ICONS
 import plugOffline from '../../assets/img/ic_offline.png';
@@ -30,6 +31,7 @@ const LANG_KEY = 'app_language';
 const STRINGS = {
   vi: {
     headerTitle: (name) => `Giám sát thiết bị: ${name || '—'}`,
+    close: 'Đóng',
     deviceName: (n) => `Thiết bị: ${n}`,
     ports: (n) => `Số cổng: ${n}`,
     port: 'Cổng',
@@ -44,20 +46,27 @@ const STRINGS = {
     power: 'Công suất sạc',
     energy: 'Năng lượng tiêu thụ',
     loading: 'Đang tải…',
+    noPorts: 'Không có cổng nào',
+    portDetail: 'Chi tiết cổng',
+    sessionTimeline: 'Dòng thời gian phiên',
     devices: 'Thiết bị',
     openLink: 'Mở liên kết',
     saveQR: 'Tải QR',
     tapQRHint: 'Chạm QR để mở link',
+    savedTo: (f) => `Đã lưu: ${f}`,
     toastOpenLinkFail: 'Không mở được link',
     toastNoPort: 'Không có thông tin cổng',
+    toastNeedStorage: 'Thiếu quyền lưu file',
+    toastNeedPhoto: 'Thiếu quyền truy cập thư viện ảnh',
     toastQrNotReady: 'QR Code chưa sẵn sàng, vui lòng thử lại',
-    toastSaved: 'Đã lưu',
+    toastSaved: 'Đã lưu ảnh vào thư viện',
     errLoadDevices: 'Load devices lỗi',
     errLoadDeviceInfo: 'Load device info lỗi',
     missingToken: 'Thiếu accessToken',
   },
   en: {
     headerTitle: (name) => `Monitoring device: ${name || '—'}`,
+    close: 'Close',
     deviceName: (n) => `Device: ${n}`,
     ports: (n) => `Ports: ${n}`,
     port: 'Port',
@@ -72,14 +81,20 @@ const STRINGS = {
     power: 'Charge power',
     energy: 'Energy',
     loading: 'Loading…',
+    noPorts: 'No ports',
+    portDetail: 'Port detail',
+    sessionTimeline: 'Session timeline',
     devices: 'Devices',
     openLink: 'Open link',
     saveQR: 'Save QR',
     tapQRHint: 'Tap QR to open link',
+    savedTo: (f) => `Saved: ${f}`,
     toastOpenLinkFail: 'Failed to open link',
     toastNoPort: 'Missing port info',
+    toastNeedStorage: 'Storage permission required',
+    toastNeedPhoto: 'Photo library permission required',
     toastQrNotReady: 'QR Code not ready, please try again',
-    toastSaved: 'Saved',
+    toastSaved: 'Saved to Photos',
     errLoadDevices: 'Failed to load devices',
     errLoadDeviceInfo: 'Failed to load device info',
     missingToken: 'Missing accessToken',
@@ -98,22 +113,40 @@ const useI18n = () => {
 /* ========== helpers ========== */
 const STATUS_COLOR = { ready: '#16a34a', charging: '#2563eb', offline: '#ef4444', fault: '#f59e0b' };
 const normalize = (s) => String(s || '').trim().toLowerCase();
+
 async function getAccessTokenSafe() {
   const keys = ['accessToken', 'ACCESS_TOKEN', 'token', 'auth_token', 'access_token'];
   for (const k of keys) { const v = await AsyncStorage.getItem(k); if (v) return v; }
   return null;
 }
+
 function isDeviceOffline(info) {
-  const s = normalize(info?.status); const a = normalize(info?.availability);
+  const s = normalize(info?.status);
+  const a = normalize(info?.availability);
   return s === 'offline' || a === 'offline';
 }
 function formatDateTime(iso, lang = 'vi') {
   if (!iso) return '—';
-  try { const loc = lang === 'en' ? 'en-US' : 'vi-VN'; return new Date(iso).toLocaleString(loc); } catch { return '—'; }
+  try {
+    const loc = lang === 'en' ? 'en-US' : 'vi-VN';
+    return new Date(iso).toLocaleString(loc);
+  } catch { return '—'; }
 }
-function trim0(n, dp = 2) { if (!isFinite(n)) n = 0; return Number(n).toFixed(dp).replace(/\.?0+$/, ''); }
-function formatPowerKW(n) { const v = Number(n)||0; const a=Math.abs(v); return a<1?`${Math.round(v*1000)} W`:`${trim0(v,2)} kW`; }
-function formatEnergyKWh(n){ const v=Number(n)||0; const a=Math.abs(v); return a<1?`${Math.round(v*1000)} Wh`:`${trim0(v,2)} kWh`; }
+
+function trim0(n, dp = 2) {
+  if (!isFinite(n)) n = 0;
+  return Number(n).toFixed(dp).replace(/\.?0+$/, '');
+}
+function formatPowerKW(n) {
+  const v = Number(n) || 0;
+  const a = Math.abs(v);
+  return a < 1 ? `${Math.round(v * 1000)} W` : `${trim0(v, 2)} kW`;
+}
+function formatEnergyKWh(n) {
+  const v = Number(n) || 0;
+  const a = Math.abs(v);
+  return a < 1 ? `${Math.round(v * 1000)} Wh` : `${trim0(v, 2)} kWh`;
+}
 
 /* ====== Cache keys (SWR) ====== */
 const K_MONI_DEVICES_MENU = 'moni_devices_menu';
@@ -122,11 +155,11 @@ const K_MONI_DEVICE_MAP   = 'moni_device_map';
 const SWR_MAX_AGE_MS = 60 * 1000;
 
 /* ====== LIVE overlay config ====== */
-const LIVE_TTL_MS = 10 * 1000;        // TTL cho số liệu
-const ZERO_TO_READY_SEC = 0;          // fallback nếu backend không bắn pt=3
+const LIVE_TTL_MS = 10 * 1000;        // TTL overlay
+const ZERO_TO_READY_SEC = 0;          // nếu backend không bắn pt=3, set >0 để auto ready khi kw=0 liên tục Xs
 
 // Map<device_code, { status?:'online'|'offline', ts:number, ports: Map<number, {portStatus?:string, powerKW?:number, energyKWh?:number, end?:string, zeroSince?:number, ts:number}> }>
-const liveStore = { current: new Map() };
+const liveRef = { current: new Map() };
 
 function mapPortStatusToVisual(s) {
   const x = normalize(s);
@@ -137,31 +170,51 @@ function mapPortStatusToVisual(s) {
   return undefined;
 }
 
-/* ====== ADAPTER ====== */
+
+
+
+/* ====== ADAPTER (web rule) ====== */
 function adaptDeviceInfoToUI(info, sessionsDev, lang) {
   const name = info?.name || info?.device_code || '—';
   const ports = Array.isArray(info?.ports) ? info.ports : [];
   const deviceOffline = isDeviceOffline(info);
+ 
 
   const sessionByPort = {};
   if (sessionsDev && Array.isArray(sessionsDev.ports)) {
-    for (const p of sessionsDev.ports) if (p?.portNumber != null) sessionByPort[p.portNumber] = p.latestSession || null;
+    for (const p of sessionsDev.ports) {
+      if (p?.portNumber != null) sessionByPort[p.portNumber] = p.latestSession || null;
+    }
   }
+  console.log('[DEBUG] sessionByPort:', sessionByPort);
+
 
   const uiPorts = ports.map((p) => {
     const sess = sessionByPort[p?.portNumber] || p?.latestSession || null;
-    const portStat = normalize(p?.status);
-    const sessStat = normalize(sess?.status);
 
-    let visual, textStat;
-    if (deviceOffline) { visual='offline'; textStat='offline'; }
-    else if (portStat === 'busy') { visual='charging'; textStat='charging'; }
-    else if (portStat === 'idle') { visual='ready'; textStat='ready'; }
-    else if (['fault','error','unavailable'].includes(portStat)) { visual='fault'; textStat='fault'; }
-    else {
-      const isRun = ['running','in_progress','active','charging'].includes(sessStat);
-      visual = isRun ? 'charging' : 'ready'; textStat = visual;
-    }
+   const portStat = normalize(p?.status);
+const sessStat = normalize(sess?.status);
+
+let visual = 'ready';
+let textStat = 'ready';
+
+if (deviceOffline) {
+  visual = 'offline'; textStat = 'offline';
+} else if (['busy','charging'].includes(portStat)) {
+  visual = 'charging'; textStat = 'charging';
+} else if (['idle','ready'].includes(portStat)) {
+  visual = 'ready'; textStat = 'ready';
+} else if (!portStat) {
+  // Fallback khi thiếu status ở detail → dùng session
+  if (['running','in_progress','active','charging'].includes(sessStat)) {
+    visual = 'charging'; textStat = 'charging';
+  } else if (['completed','finish','finished','stopped','pending'].includes(sessStat)) {
+    visual = 'ready'; textStat = 'ready';
+  }
+} else if (['fault','error','unavailable'].includes(portStat)) {
+  visual = 'fault'; textStat = 'fault';
+}
+
 
     return {
       id: p?._id ?? `${p?.portNumber ?? 'x'}`,
@@ -188,35 +241,40 @@ function adaptDeviceInfoToUI(info, sessionsDev, lang) {
   };
 }
 
-/* ========= APPLY LIVE ========= */
+
+
+
+/* ========= APPLY LIVE OVERLAY ========= */
 function applyLiveToUI(ui) {
   if (!ui?.code) return ui;
-  const dev = liveStore.current.get(ui.code);
+  const dev = liveRef.current.get(ui.code);
   if (!dev) return ui;
 
   const next = { ...ui };
   if (dev.status) next.deviceStatus = dev.status;
 
   next.ports = (ui.ports || []).map((p) => {
-    const liveP = (dev.ports || new Map()).get(p.portNumber);
+    const portMap = dev.ports || new Map();
+    const liveP = portMap.get(p.portNumber);
     if (!liveP) return p;
 
     const fresh = (Date.now() - liveP.ts) <= LIVE_TTL_MS;
+
     let visual = p.visualStatus;
     let text   = p.portTextStatus;
 
     if (liveP.portStatus) {
       const mapped = mapPortStatusToVisual(liveP.portStatus);
-      if (mapped) { visual = mapped; text = mapped; }  // trạng thái overlay KHÔNG TTL
+      if (mapped) { visual = mapped; text = mapped; }
     }
 
     return {
       ...p,
       visualStatus: visual,
       portTextStatus: text,
-      kw:  fresh && typeof liveP.powerKW === 'number'   ? liveP.powerKW   : p.kw,
-      kwh: fresh && typeof liveP.energyKWh === 'number' ? liveP.energyKWh : p.kwh,
-      end: fresh && liveP.end ? liveP.end : p.end,
+      kw:    fresh && typeof liveP.powerKW === 'number'   ? liveP.powerKW   : p.kw,
+      kwh:   fresh && typeof liveP.energyKWh === 'number' ? liveP.energyKWh : p.kwh,
+      end:   fresh && liveP.end ? liveP.end : p.end,
     };
   });
 
@@ -226,11 +284,16 @@ function applyLiveToUI(ui) {
 /* ===================== SCREEN ===================== */
 export default function MonitoringScreen() {
   const { t, lang } = useI18n();
+
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const openDrawer = useCallback(() => setDrawerOpen(true), []);
+  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   const [headerHeight, setHeaderHeight] = useState(0);
+
   const [devicesMenu, setDevicesMenu] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [selectedDevice, setSelectedDevice] = useState(null);
+
   const [loadingList, setLoadingList] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -243,9 +306,12 @@ export default function MonitoringScreen() {
 
   const [showModal, setShowModal] = useState(false);
   const [modalPort, setModalPort] = useState(null);
+  const openPortModal = useCallback((p) => { setModalPort(p); setShowModal(true); }, []);
+  const closePortModal = useCallback(() => setShowModal(false), []);
+
   const qrRef = useRef(null);
 
-  /* ===== SWR hydrate ===== */
+  /* ====== SWR: hydrate cache ====== */
   useEffect(() => {
     (async () => {
       try {
@@ -267,8 +333,12 @@ export default function MonitoringScreen() {
     })();
   }, []);
 
-  const saveMenuToCache = useCallback(async (menu) => { try { await AsyncStorage.setItem(K_MONI_DEVICES_MENU, JSON.stringify(menu)); } catch {} }, []);
-  const saveSelectedId   = useCallback(async (id)   => { try { await AsyncStorage.setItem(K_MONI_SELECTED_ID, id ?? ''); } catch {} }, []);
+  const saveMenuToCache = useCallback(async (menu) => {
+    try { await AsyncStorage.setItem(K_MONI_DEVICES_MENU, JSON.stringify(menu)); } catch {}
+  }, []);
+  const saveSelectedId = useCallback(async (id) => {
+    try { await AsyncStorage.setItem(K_MONI_SELECTED_ID, id ?? ''); } catch {}
+  }, []);
   const saveDeviceUiToCache = useCallback(async (deviceId, ui) => {
     try {
       const raw = await AsyncStorage.getItem(K_MONI_DEVICE_MAP);
@@ -302,14 +372,17 @@ export default function MonitoringScreen() {
       }));
       setDevicesMenu(menu);
       saveMenuToCache(menu);
+
       if (!selectedId && menu.length > 0) {
         setSelectedId(menu[0].id);
         saveSelectedId(menu[0].id);
       }
     } catch (e) {
       console.warn('loadDeviceList error', e); toast(e?.message || t('errLoadDevices'));
-    } finally { if (!silent) setLoadingList(false); }
-  }, [selectedId, saveMenuToCache, saveSelectedId, toast, t]);
+    } finally {
+      if (!silent) setLoadingList(false);
+    }
+  }, [selectedId, toast, saveMenuToCache, saveSelectedId, t]);
 
   const fetchDeviceDetail = useCallback(async (deviceId) => {
     const token = await getAccessTokenSafe(); if (!token) throw new Error(t('missingToken'));
@@ -318,43 +391,61 @@ export default function MonitoringScreen() {
     const sessionsArr = Array.isArray(sessionsRaw) ? sessionsRaw : [];
     const sessionsDev =
       sessionsArr.find((d) => d?._id === infoPayload?._id) ||
-      sessionsArr.find((d) => d?.device_code === infoPayload?.device_code) || null;
+      sessionsArr.find((d) => d?.device_code === infoPayload?.device_code) ||
+      null;
     return adaptDeviceInfoToUI(infoPayload, sessionsDev, lang);
   }, [lang, t]);
 
   const loadDeviceDetail = useCallback(async (deviceId, { swr = true } = {}) => {
     if (!deviceId) return;
+
     if (swr) {
       const cached = await getCachedDevice(deviceId);
-      if (cached?.ui) { baseDeviceRef.current = cached.ui; setSelectedDevice(applyLiveToUI(cached.ui)); }
+      if (cached?.ui) {
+        baseDeviceRef.current = cached.ui;
+        setSelectedDevice(applyLiveToUI(cached.ui));
+      }
+
       const tooOld = !cached?.ts || (Date.now() - cached.ts > SWR_MAX_AGE_MS);
       if (tooOld) {
         try {
           if (!cached?.ui) setLoadingDetail(true);
           const uiBase = await fetchDeviceDetail(deviceId);
           baseDeviceRef.current = uiBase;
-          setSelectedDevice(applyLiveToUI(uiBase));
+          const uiApplied = applyLiveToUI(uiBase);
+          setSelectedDevice(uiApplied);
           saveDeviceUiToCache(deviceId, uiBase);
         } catch (e) {
           console.warn('loadDeviceDetail(SWR) error', e);
           !cached?.ui && toast(e?.message || t('errLoadDeviceInfo'));
-        } finally { setLoadingDetail(false); }
+        } finally {
+          setLoadingDetail(false);
+        }
       }
     } else {
       setLoadingDetail(true);
       try {
         const uiBase = await fetchDeviceDetail(deviceId);
         baseDeviceRef.current = uiBase;
-        setSelectedDevice(applyLiveToUI(uiBase));
+        const uiApplied = applyLiveToUI(uiBase);
+        setSelectedDevice(uiApplied);
         saveDeviceUiToCache(deviceId, uiBase);
       } catch (e) {
-        console.warn('loadDeviceDetail error', e); toast(e?.message || t('errLoadDeviceInfo'));
-      } finally { setLoadingDetail(false); }
+        console.warn('loadDeviceDetail error', e);
+        toast(e?.message || t('errLoadDeviceInfo'));
+      } finally {
+        setLoadingDetail(false);
+      }
     }
   }, [fetchDeviceDetail, getCachedDevice, saveDeviceUiToCache, toast, t]);
 
   useEffect(() => { loadDeviceList({ silent: !!devicesMenu.length }); /* eslint-disable-line */ }, []);
-  useEffect(() => { if (selectedId) { saveSelectedId(selectedId); loadDeviceDetail(selectedId, { swr: true }); } /* eslint-disable-line */ }, [selectedId]);
+useEffect(() => {
+ if (selectedId) {
+    saveSelectedId(selectedId);
+   loadDeviceDetail(selectedId, { swr: false }); // ép gọi API mới ngay sau F5
+ }
+} ,[selectedId]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -364,24 +455,39 @@ export default function MonitoringScreen() {
     } finally { setRefreshing(false); }
   }, [loadDeviceList, loadDeviceDetail, selectedId]);
 
-  /* ======= SSE ======= */
-  const parseMaybeJson = (x) => (x && typeof x === 'object') ? x : (typeof x === 'string' ? (()=>{ try { return JSON.parse(x);} catch {return null;} })() : null);
-  const toInt = (v) => { const n = Number(v); return Number.isFinite(n) ? n : NaN; };
+  /* ======= SSE: parse & overlay live theo device_code + port ======= */
+  const parseMaybeJson = (x) => {
+    if (x && typeof x === 'object') return x;
+    if (typeof x === 'string') {
+      try { return JSON.parse(x); } catch { return null; }
+    }
+    return null;
+  };
+  const toInt = (v) => {
+    if (typeof v === 'number') return v;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : NaN;
+  };
 
-  const getSelectedDeviceCode = useCallback(() => baseDeviceRef.current?.code || selectedDevice?.code, [selectedDevice]);
+  const getSelectedDeviceCode = useCallback(() => {
+    let code = baseDeviceRef.current?.code || selectedDevice?.code;
+    return code;
+  }, [selectedDevice]);
 
   useEffect(() => {
     const off = sseManager.on((evt) => {
       if (evt?.type !== 'message') return;
+
       const obj = parseMaybeJson(evt.data) || evt.data;
       const pt = toInt(obj?.packetType);
       const code = obj?.device_code || obj?.deviceCode || obj?.deviceID || obj?.deviceId;
       if (!code || !Number.isFinite(pt)) return;
 
       const now = Date.now();
-      const dev = liveStore.current.get(code) || { ports: new Map(), ts: now };
+      const dev = liveRef.current.get(code) || { ports: new Map(), ts: now };
 
       if (pt === 1) {
+        // power/energy (tổng hoặc theo port)
         const arr = Array.isArray(obj?.kw) ? obj.kw : null;
         const powerKW   = Number(arr?.[0]) || 0;
         const energyKWh = Number(arr?.[1]) || 0;
@@ -393,27 +499,32 @@ export default function MonitoringScreen() {
             ...cur,
             powerKW,
             energyKWh,
+            // nếu power về 0 thì đánh dấu thời điểm về 0 (để optional auto-ready)
             zeroSince: (powerKW === 0 ? (cur.zeroSince || now) : undefined),
             ts: now,
           });
+        } else {
+          // không có portNumber -> bỏ qua hoặc tùy logic của m (ở đây bỏ qua để tránh ghi đè sai cổng)
         }
         dev.ts = now;
-        liveStore.current.set(code, dev);
+        liveRef.current.set(code, dev);
 
       } else if (pt === 2) {
+        // online/offline device
         const st = normalize(obj?.status);
         dev.status = (st === 'offline') ? 'offline' : 'online';
         dev.ts = now;
-        liveStore.current.set(code, dev);
+        liveRef.current.set(code, dev);
 
       } else if (pt === 3) {
+        // completed / status cổng
         const pn = toInt(obj?.portNumber);
         if (Number.isFinite(pn)) {
           const cur = dev.ports.get(pn) || {};
           const mapped = mapPortStatusToVisual(obj?.portStatus) || 'ready';
           dev.ports.set(pn, {
             ...cur,
-            portStatus: mapped,          // flip ngay
+            portStatus: mapped,                  // flip về ready ngay
             energyKWh: Number(obj?.kwh) || cur.energyKWh,
             end: obj?.endTime || cur.end,
             powerKW: 0,
@@ -421,12 +532,13 @@ export default function MonitoringScreen() {
             ts: now,
           });
           dev.ts = now;
-          liveStore.current.set(code, dev);
+          liveRef.current.set(code, dev);
         }
       } else {
         return;
       }
 
+      // Re-render nếu đang xem đúng device
       const showing = getSelectedDeviceCode();
       if (showing && showing === code && baseDeviceRef.current) {
         setSelectedDevice(applyLiveToUI(baseDeviceRef.current));
@@ -436,29 +548,35 @@ export default function MonitoringScreen() {
     return () => { try { off?.(); } catch {} };
   }, [getSelectedDeviceCode]);
 
-  // Tick mỗi 1s: TTL số liệu + fallback zero→ready (tuỳ chọn)
+  // Tick mỗi 1s để TTL tự rơi overlay, và (tuỳ chọn) auto-ready khi kw=0 đủ lâu
   useEffect(() => {
     const id = setInterval(() => {
       const base = baseDeviceRef.current;
       if (!base) return;
 
       if (ZERO_TO_READY_SEC > 0) {
-        const dev = liveStore.current.get(base.code);
+        const dev = liveRef.current.get(base.code);
         const now = Date.now();
         if (dev?.ports) {
           for (const [pn, cur] of dev.ports.entries()) {
             if (cur?.powerKW === 0 && cur?.zeroSince && (now - cur.zeroSince >= ZERO_TO_READY_SEC * 1000)) {
-              dev.ports.set(pn, { ...cur, portStatus: 'ready', ts: now });
+              // nếu backend không gửi pt=3 thì ép về ready
+              dev.ports.set(pn, {
+                ...cur,
+                portStatus: 'ready',
+                ts: now,
+              });
             }
           }
         }
       }
+
       setSelectedDevice(applyLiveToUI(base));
     }, 1000);
     return () => clearInterval(id);
   }, []);
 
-  /* ===== Header & list ===== */
+  /* ===== Skeleton / header ===== */
   const expectedPorts = (() => {
     if (selectedDevice?.ports?.length) return selectedDevice.ports.length;
     const m = devicesMenu.find(d => d.id === selectedId);
@@ -471,7 +589,9 @@ export default function MonitoringScreen() {
   const headerName = selectedDevice?.name || menuSelected?.name || t('loading');
   const headerPortsText = (() => {
     if (isLoadingPorts) {
-      return menuSelected?.portsCount != null ? t('ports', menuSelected.portsCount) : t('ports', '…');
+      return menuSelected?.portsCount != null
+        ? t('ports', menuSelected.portsCount)
+        : t('ports', '…');
     }
     return t('ports', selectedDevice?.ports?.length || 0);
   })();
@@ -489,24 +609,59 @@ export default function MonitoringScreen() {
   }, [toast, t]);
 
   const saveQrPng = useCallback(async () => {
-    if (!modalPort) { toast(t('toastNoPort')); return; }
-    // WEB: vẽ QR ra canvas bằng lib 'qrcode' rồi download
-    try {
-      const url = buildCheckoutUrl(modalPort.portNumber);
-      const canvas = document.createElement('canvas');
-      const size = 300; canvas.width = size; canvas.height = size;
-      const QRCodeLib = await import('qrcode');
-      await QRCodeLib.toCanvas(canvas, url, { width: size, margin: 1 });
-      const pngUrl = canvas.toDataURL('image/png');
-      const a = document.createElement('a');
-      a.href = pngUrl;
-      a.download = `qr_${selectedDevice?.code || 'device'}_port${modalPort.portNumber}.png`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      toast(t('toastSaved'));
-    } catch (err) {
-      console.error('saveQrPng web error', err); toast(err?.message || t('toastQrNotReady'));
+    if (!modalPort) {
+      toast(t('toastNoPort'));
+      return;
     }
-  }, [modalPort, selectedDevice, t, toast, buildCheckoutUrl]);
+
+    try {
+      // iOS permission placeholder
+      if (Platform.OS === 'ios') {
+        const permission = await PermissionsAndroid.request('ios.permission.PHOTO_LIBRARY_ADD_ONLY');
+        if (permission === 'denied') {
+          toast(t('toastNeedPhoto'));
+          return;
+        }
+      }
+
+      // Android < 29 cần WRITE_EXTERNAL_STORAGE
+      if (Platform.OS === 'android' && Platform.Version < 29) {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          toast(t('toastNeedStorage'));
+          return;
+        }
+      }
+
+      if (!qrRef.current) {
+        toast(t('toastQrNotReady'));
+        return;
+      }
+
+      qrRef.current.toDataURL(async (base64Data) => {
+        try {
+          const fname = `qr_${selectedDevice?.code || 'device'}_port${modalPort.portNumber}_${Date.now()}.png`;
+
+          const tempPath = `${RNFS.CachesDirectoryPath}/${fname}`;
+          await RNFS.writeFile(tempPath, base64Data, 'base64');
+
+          await CameraRoll.save(tempPath, { type: 'photo' });
+
+          await RNFS.unlink(tempPath).catch(() => {});
+
+          toast(t('toastSaved'));
+        } catch (writeError) {
+          console.error('Save error:', writeError);
+          toast('' + (writeError?.message || writeError));
+        }
+      });
+    } catch (error) {
+      console.error('saveQrPng error:', error);
+      toast('' + (error?.message || error));
+    }
+  }, [modalPort, selectedDevice, toast, t]);
 
   /* ===== UI ===== */
   const renderItem = useCallback(({ item }) => {
@@ -538,8 +693,14 @@ export default function MonitoringScreen() {
 
           <View style={styles.row}><Text style={styles.kv}>{t('start')}</Text><Text style={styles.v}>{item.start}</Text></View>
           <View style={styles.row}><Text style={styles.kv}>{t('end')}</Text><Text style={styles.v}>{item.end}</Text></View>
-          <View style={styles.row}><Text style={styles.kv}>{t('power')}</Text><Text style={styles.v}>{formatPowerKW(item.kw)}</Text></View>
-          <View style={styles.row}><Text style={styles.kv}>{t('energy')}</Text><Text style={styles.v}>{formatEnergyKWh(item.kwh)}</Text></View>
+          <View style={styles.row}>
+            <Text style={styles.kv}>{t('power')}</Text>
+            <Text style={styles.v}>{formatPowerKW(item.kw)}</Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.kv}>{t('energy')}</Text>
+            <Text style={styles.v}>{formatEnergyKWh(item.kwh)}</Text>
+          </View>
         </View>
       </TouchableOpacity>
     );
@@ -556,7 +717,7 @@ export default function MonitoringScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header} onLayout={(e)=>setHeaderHeight(e.nativeEvent.layout.height)}>
-        <TouchableOpacity style={styles.menuButton} onPress={() => setDrawerOpen(true)}>
+        <TouchableOpacity style={styles.menuButton} onPress={openDrawer}>
           <Icon name="menu" size={24} color="white" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('headerTitle', headerName)}</Text>
@@ -564,9 +725,9 @@ export default function MonitoringScreen() {
 
       {/* Drawer */}
       <View pointerEvents="box-none" style={{ position:'absolute', left:0, right:0, bottom:0, top:headerHeight, zIndex:9998 }}>
-        <EdgeDrawer visible={drawerOpen} onClose={() => setDrawerOpen(false)}>
+        <EdgeDrawer visible={drawerOpen} onClose={closeDrawer}>
           <View style={styles.drawerHeader}>
-            <View style={styles.drawerBadge}><Icon name="ev-station" size={16} color="#fff" /></View>
+            <View className="drawerBadge" style={styles.drawerBadge}><Icon name="ev-station" size={16} color="#fff" /></View>
             <Text style={styles.drawerTitle}>{t('devices')}</Text>
           </View>
           <View style={{ height: 8 }} />
@@ -575,7 +736,7 @@ export default function MonitoringScreen() {
             keyExtractor={(x) => String(x.id)}
             renderItem={({ item }) => (
               <TouchableOpacity
-                onPress={() => { setSelectedId(item.id); setDrawerOpen(false); }}
+                onPress={() => { setSelectedId(item.id); closeDrawer(); }}
                 style={[styles.deviceMenuItem, selectedId === item.id && { borderColor: '#111827', backgroundColor: '#f7faff' }]}
               >
                 <View style={styles.deviceMenuIcon}><Icon name="memory" size={16} color="#fff" /></View>
@@ -627,15 +788,30 @@ export default function MonitoringScreen() {
       </View>
 
       {/* CENTER MODAL có QR */}
-      <Modal visible={showModal} transparent animationType="fade" onRequestClose={() => setShowModal(false)}>
-        <TouchableOpacity activeOpacity={1} style={styles.modalOverlay} onPress={() => setShowModal(false)}>
-          <TouchableOpacity activeOpacity={1} style={styles.modalContainer} onPress={(e) => e.stopPropagation()}>
+      <Modal
+        visible={showModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={closePortModal}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={styles.modalOverlay}
+          onPress={closePortModal}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            style={styles.modalContainer}
+            onPress={(e) => e.stopPropagation()}
+          >
             {/* Header */}
             <View style={styles.modalHeader}>
               <View style={styles.modalHeaderLeft}>
-                <View style={styles.modalIconBadge}><Icon name="bolt" size={20} color="#fff" /></View>
+                <View style={styles.modalIconBadge}>
+                  <Icon name="bolt" size={20} color="#fff" />
+                </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.modalTitle}>{'Chi tiết cổng'}</Text>
+                  <Text style={styles.modalTitle}>{t('portDetail')}</Text>
                   {!!modalPort && (
                     <Text style={styles.modalSubtitle}>
                       {headerName} • {t('port')} {modalPort?.name} • {t(modalPort?.portTextStatus)}
@@ -643,53 +819,69 @@ export default function MonitoringScreen() {
                   )}
                 </View>
               </View>
-              <TouchableOpacity onPress={() => setShowModal(false)} style={styles.modalCloseBtn}>
+              <TouchableOpacity onPress={closePortModal} style={styles.modalCloseBtn}>
                 <Icon name="close" size={24} color="#111827" />
               </TouchableOpacity>
             </View>
 
-            {/* Content scrollable */}
+            {/* Content */}
             {!!modalPort && (
-              <ScrollView style={{ flexGrow: 0 }} contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
-                <View style={styles.modalContent}>
-                  <View style={styles.modalInfoCard}>
-                    {[
-                      ['Port', `${t('port')} ${modalPort.name}`],
-                      [t('status'), t(modalPort.portTextStatus)],
-                      [t('start'), modalPort.start],
-                      [t('end'), modalPort.end],
-                      [t('power'), formatPowerKW(modalPort.kw)],
-                      [t('energy'), formatEnergyKWh(modalPort.kwh)],
-                    ].map(([k, v], i) => (
-                      <View key={k} style={[styles.modalInfoRow, i === 0 && { borderTopWidth: 0 }]}>
-                        <Text style={styles.modalInfoKey}>{k}</Text>
-                        <Text style={styles.modalInfoValue}>{v}</Text>
-                      </View>
-                    ))}
-                  </View>
+              <View style={styles.modalContent}>
+                <View style={styles.modalInfoCard}>
+                  {[
+                    ['Port', `${t('port')} ${modalPort.name}`],
+                    [t('status'), t(modalPort.portTextStatus)],
+                    [t('start'), modalPort.start],
+                    [t('end'), modalPort.end],
+                    [t('power'), formatPowerKW(modalPort.kw)],
+                    [t('energy'), formatEnergyKWh(modalPort.kwh)],
+                  ].map(([k, v], i) => (
+                    <View key={k} style={[styles.modalInfoRow, i === 0 && { borderTopWidth: 0 }]}>
+                      <Text style={styles.modalInfoKey}>{k}</Text>
+                      <Text style={styles.modalInfoValue}>{v}</Text>
+                    </View>
+                  ))}
+                </View>
 
-                  <Text style={styles.qrHint}>{t('tapQRHint')}</Text>
-                  <View style={styles.qrWrap}>
-                    <TouchableOpacity activeOpacity={0.9} onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}>
-                      <View style={styles.qrBox}>
-                        <QRCode value={buildCheckoutUrl(modalPort.portNumber)} size={200} quietZone={10} getRef={(c) => { qrRef.current = c; }} />
-                      </View>
+                {/* ==== QR AREA ==== */}
+                <Text style={styles.qrHint}>{t('tapQRHint')}</Text>
+                <View style={styles.qrWrap}>
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
+                  >
+                    <View style={styles.qrBox}>
+                      <QRCode
+                        value={buildCheckoutUrl(modalPort.portNumber)}
+                        size={200}
+                        quietZone={10}
+                        getRef={(c) => { qrRef.current = c; }}
+                      />
+                    </View>
+                  </TouchableOpacity>
+
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity
+                      style={[styles.btnPrimary, { flex: 1 }]}
+                      onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
+                    >
+                      <Icon name="open-in-new" size={18} color="#fff" style={{ marginRight: 6 }} />
+                      <Text style={styles.btnPrimaryText}>{t('openLink')}</Text>
                     </TouchableOpacity>
 
-                    <View style={styles.modalActions}>
-                      <TouchableOpacity style={[styles.btnPrimary, { flex: 1 }]} onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}>
-                        <Icon name="open-in-new" size={18} color="#fff" style={{ marginRight: 6 }} />
-                        <Text style={styles.btnPrimaryText}>{t('openLink')}</Text>
-                      </TouchableOpacity>
-                      <View style={{ width: 10 }} />
-                      <TouchableOpacity style={[styles.btnGhost, { flex: 1 }]} onPress={saveQrPng}>
-                        <Icon name="file-download" size={18} color="#2563EB" style={{ marginRight: 6 }} />
-                        <Text style={styles.btnGhostText}>{t('saveQR')}</Text>
-                      </TouchableOpacity>
-                    </View>
+                    <View style={{ width: 10 }} />
+
+                    <TouchableOpacity
+                      style={[styles.btnGhost, { flex: 1 }]}
+                      onPress={saveQrPng}
+                    >
+                      <Icon name="file-download" size={18} color="#2563EB" style={{ marginRight: 6 }} />
+                      <Text style={styles.btnGhostText}>{t('saveQR')}</Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
-              </ScrollView>
+                {/* ==== /QR AREA ==== */}
+              </View>
             )}
           </TouchableOpacity>
         </TouchableOpacity>
@@ -754,14 +946,13 @@ const styles = StyleSheet.create({
   kv: { fontSize: 13, color: '#6B7280' },
   v: { fontSize: 13, color: '#111827', fontWeight: '600' },
 
-  // CENTER MODAL STYLES (web)
+  // CENTER MODAL STYLES
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-    zIndex: 2147483647,
   },
   modalContainer: {
     backgroundColor: '#fff',
@@ -769,7 +960,6 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 450,
     maxHeight: '85%',
-    overflow: 'hidden',   // quan trọng để nội dung scroll gọn
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.25,
@@ -777,42 +967,100 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   modalHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16,
-    borderBottomWidth: 1, borderBottomColor: '#E5E7EB',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
   },
-  modalHeaderLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 12 },
+  modalHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 12,
+  },
   modalIconBadge: {
-    width: 40, height: 40, borderRadius: 12, backgroundColor: '#4A90E2',
-    alignItems: 'center', justifyContent: 'center',
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#4A90E2',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  modalTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
-  modalSubtitle: { fontSize: 13, color: '#6B7280', marginTop: 2 },
-  modalCloseBtn: { padding: 8, marginLeft: 8 },
-  modalContent: { padding: 20 },
-  modalInfoCard: { backgroundColor: '#F8FAFC', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#E2E8F0' },
-  modalInfoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E5E7EB' },
-  modalInfoKey: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
-  modalInfoValue: { fontSize: 14, color: '#111827', fontWeight: '700' },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  modalSubtitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  modalCloseBtn: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  modalContent: {
+    padding: 20,
+  },
+  modalInfoCard: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  modalInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E7EB',
+  },
+  modalInfoKey: {
+    fontSize: 14,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  modalInfoValue: {
+    fontSize: 14,
+    color: '#111827',
+    fontWeight: '700',
+  },
 
   // QR area
   qrWrap: { alignItems: 'center', marginTop: 5 },
   qrBox: {
-    backgroundColor: '#fff', padding: 12, borderRadius: 16,
-    borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center', justifyContent: 'center', alignSelf: 'center',
+    backgroundColor: '#fff',
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
   },
   qrHint: { marginTop: 2, fontSize: 12, color: '#6B7280', textAlign:'center' },
+
   modalActions: { flexDirection: 'row', marginTop: 14 },
 
   btnPrimary: {
-    backgroundColor: '#2563EB', borderRadius: 12, paddingVertical: 10,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#2563EB',
+    borderRadius: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   btnPrimaryText: { color: '#fff', fontWeight: '800' },
 
   btnGhost: {
     borderWidth: 1, borderColor: '#2563EB', borderRadius: 12,
-    paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center'
   },
   btnGhostText: { color: '#2563EB', fontWeight: '800' },
 });
