@@ -307,7 +307,6 @@ function ModalContent({
                 style={styles.btnPrimary}
                 onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
               >
-                {/* <Icon name="open-in-new" size={18} color="#fff" style={{ marginRight: 6 }} /> */}
                 <Text style={styles.btnPrimaryText}>{t('openLink')}</Text>
               </TouchableOpacity>
 
@@ -317,7 +316,6 @@ function ModalContent({
                 style={styles.btnGhost}
                 onPress={saveQrPng}
               >
-                {/* <Icon name="file-download" size={18} color="#2563EB" style={{ marginRight: 6 }} /> */}
                 <Text style={styles.btnGhostText}>{t('saveQR')}</Text>
               </TouchableOpacity>
             </View>
@@ -812,32 +810,34 @@ export default function MonitoringScreen() {
           })}
         >
           <EdgeDrawer visible onClose={closeDrawer}>
-            <View style={styles.drawerHeader}>
-              <View style={styles.drawerBadge}><Icon name="ev-station" size={16} color="#fff" /></View>
-              <Text style={styles.drawerTitle}>{t('devices')}</Text>
+            <View style={{ flexGrow: 0 }}>
+              <View style={styles.drawerHeader}>
+                <View style={styles.drawerBadge}><Icon name="memory" size={16} color="#fff" /></View>
+                <Text style={styles.drawerTitle}>{t('devices')}</Text>
+              </View>
+              <View style={{ height: 8 }} />
+              <FlatList
+                data={devicesMenu}
+                keyExtractor={(x) => String(x.id)}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    onPress={() => { setSelectedId(item.id); closeDrawer(); }}
+                    style={[styles.deviceMenuItem, selectedId === item.id && { borderColor: '#111827', backgroundColor: '#f7faff' }]}
+                  >
+                    <View style={styles.deviceMenuIcon}><Icon name="memory" size={16} color="#fff" /></View>
+                    <View style={{  minWidth: 0 }}>
+                      <Text style={styles.deviceMenuName} numberOfLines={1}>{item.name}</Text>
+                      <Text style={styles.deviceMenuPorts}>{t('ports', item.portsCount)}</Text>
+                    </View>
+                    <Icon name="chevron-right" size={22} color="#9CA3AF" />
+                  </TouchableOpacity>
+                )}
+                ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
+                contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }}
+                ListEmptyComponent={<Text style={{ color:'#6B7280', padding:16 }}>{t('loading')}</Text>}
+                showsVerticalScrollIndicator={false}
+              />
             </View>
-            <View style={{ height: 8 }} />
-            <FlatList
-              data={devicesMenu}
-              keyExtractor={(x) => String(x.id)}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  onPress={() => { setSelectedId(item.id); closeDrawer(); }}
-                  style={[styles.deviceMenuItem, selectedId === item.id && { borderColor: '#111827', backgroundColor: '#f7faff' }]}
-                >
-                  <View style={styles.deviceMenuIcon}><Icon name="memory" size={16} color="#fff" /></View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.deviceMenuName} numberOfLines={1}>{item.name}</Text>
-                    <Text style={styles.deviceMenuPorts}>{t('ports', item.portsCount)}</Text>
-                  </View>
-                  <Icon name="chevron-right" size={22} color="#9CA3AF" />
-                </TouchableOpacity>
-              )}
-              ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
-              contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }}
-              ListEmptyComponent={<Text style={{ color:'#6B7280', padding:16 }}>{t('loading')}</Text>}
-              showsVerticalScrollIndicator={false}
-            />
           </EdgeDrawer>
         </View>
       )}
@@ -1106,12 +1106,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    flex: 1,
   },
   btnPrimaryText: { color: '#fff', fontWeight: '600',fontSize:14 },
 
   btnGhost: {
     borderWidth: 1, borderColor: '#2563EB', borderRadius: 12,
-    paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center'
+    paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    flex: 1,
   },
   btnGhostText: { color: '#2563EB', fontWeight: '600',fontSize:14 },
 });

@@ -245,6 +245,8 @@ const styles = StyleSheet.create({
     shadowRadius: 20,               // 🔥 tăng từ 16 -> 20
     shadowOffset: { width: 8, height: 0 }, // 🔥 tăng từ 6 -> 8
     paddingTop: 8,
+    paddingHorizontal: 16,          // 🔥 FIX: thêm padding ngang
+    paddingBottom: 16,              // 🔥 FIX: thêm padding dưới
     overflow: 'hidden',             // 🔥 để inner shadow hoạt động
   },
   innerShadow: {

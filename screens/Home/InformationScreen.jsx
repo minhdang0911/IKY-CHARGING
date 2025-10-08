@@ -9,6 +9,7 @@ import {
   ScrollView,
   Linking,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -47,6 +48,12 @@ export default function InformationScreen({ logout, navigateToScreen }) {
   const [language, setLanguage] = useState('vi');
   const t = (k) => STRINGS[language][k] || k;
 
+  const { width } = useWindowDimensions();
+  const isSmall = width <= 400;
+  const isMedium = width <= 480;
+  const PH = isSmall ? 12 : isMedium ? 20 : 32; // padding ngang theo màn hình
+  const bannerHeight = isSmall ? 180 : isMedium ? 240 : 280;
+
   useEffect(() => {
     (async () => {
       try {
@@ -80,56 +87,91 @@ export default function InformationScreen({ logout, navigateToScreen }) {
   return (
     <SafeAreaView style={styles.wrap}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingHorizontal: PH }]}>
         <Text style={styles.headerTitle}>{t('headerTitle')}</Text>
       </View>
 
-     <ScrollView
-  contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]}  
-  showsVerticalScrollIndicator={false}
->
-
+      {/* Scroll */}
+      <ScrollView
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingHorizontal: PH, alignItems: 'stretch', paddingBottom: 100 },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Banner */}
         <View style={styles.bannerCard}>
-          <Image source={logoInfo} style={styles.bannerImg} resizeMode="contain" />
-          <Text style={styles.bannerText}>TRẠM SẠC XANH • TIỆN LỢI • HIỆN ĐẠI</Text>
+          <Image
+            source={logoInfo}
+            style={[styles.bannerImg, { height: bannerHeight }]}
+            resizeMode="contain"
+          />
+          <Text style={styles.bannerText}>
+            TRẠM SẠC XANH • TIỆN LỢI • HIỆN ĐẠI
+          </Text>
         </View>
 
         {/* Contact Card */}
-        <View style={[styles.card]}>
+        <View style={styles.card}>
           <View style={styles.contactRow}>
-            <Icon name="person" size={22} color="#666" style={styles.contactIconLeft} />
+            <Icon
+              name="person"
+              size={22}
+              color="#666"
+              style={styles.contactIconLeft}
+            />
             <View style={styles.contactText}>
               <Text style={styles.contactLabel}>{t('cs')}</Text>
-              <Text style={styles.contactPhone} onPress={() => openTel('0902 806 999')}>
+              <Text
+                style={styles.contactPhone}
+                onPress={() => openTel('0902 806 999')}
+              >
                 0902 806 999
               </Text>
             </View>
             <TouchableOpacity onPress={() => openTel('0902 806 999')}>
-              <Icon name="phone" size={22} color="#1e88e5" style={styles.contactIconRight} />
+              <Icon
+                name="phone"
+                size={22}
+                color="#1e88e5"
+                style={styles.contactIconRight}
+              />
             </TouchableOpacity>
           </View>
 
           <View style={styles.divider} />
 
           <View style={styles.contactRow}>
-            <Icon name="support-agent" size={22} color="#666" style={styles.contactIconLeft} />
+            <Icon
+              name="support-agent"
+              size={22}
+              color="#666"
+              style={styles.contactIconLeft}
+            />
             <View style={styles.contactText}>
               <Text style={styles.contactLabel}>{t('tech')}</Text>
-              <Text style={styles.contactPhone} onPress={() => openTel('0938 859 085')}>
+              <Text
+                style={styles.contactPhone}
+                onPress={() => openTel('0938 859 085')}
+              >
                 0938 859 085
               </Text>
             </View>
             <TouchableOpacity onPress={() => openTel('0938 859 085')}>
-              <Icon name="phone" size={22} color="#1e88e5" style={styles.contactIconRight} />
+              <Icon
+                name="phone"
+                size={22}
+                color="#1e88e5"
+                style={styles.contactIconRight}
+              />
             </TouchableOpacity>
           </View>
         </View>
 
         {/* Menu Card */}
-        <View style={[styles.card]}>
+        <View style={styles.card}>
           <MenuItem
-             icon="info"
+            icon="info"
             text={t('accountInfo')}
             onPress={() => navigateToScreen('changeInfo')}
           />
@@ -170,7 +212,6 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: '#1e88e5',
-    paddingHorizontal: 32,
     paddingVertical: 14,
     flexDirection: 'row',
     alignItems: 'center',
@@ -181,9 +222,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   scrollContent: {
-    paddingHorizontal: 60,
     paddingVertical: 30,
-    alignItems: 'center',
+    alignItems: 'stretch',
   },
   bannerCard: {
     width: '100%',
@@ -197,7 +237,6 @@ const styles = StyleSheet.create({
   },
   bannerImg: {
     width: '100%',
-    height: 300,
     alignSelf: 'center',
   },
   bannerText: {
@@ -214,7 +253,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1.2,
     borderColor: '#cfd8dc',
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
     paddingVertical: 16,
     marginBottom: 20,
     boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
@@ -241,6 +280,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginHorizontal: 12,
     justifyContent: 'center',
+    minWidth: 0,
   },
   contactLabel: {
     fontSize: 14,
@@ -262,6 +302,8 @@ const styles = StyleSheet.create({
   menuLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 1,
+    minWidth: 0,
   },
   menuIcon: {
     width: 24,
@@ -273,7 +315,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333',
     fontWeight: '500',
-    lineHeight: 22, // ✅ canh icon ngang hàng chữ
+    lineHeight: 22,
+    whiteSpace: 'nowrap',
   },
   iconFix: { verticalAlign: 'middle' },
 });
