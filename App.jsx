@@ -241,15 +241,19 @@ export default function App() {
     (async () => {
       try {
         const access = await AsyncStorage.getItem(K_ACCESS);
-        if (access) {
-          restoreSession();
+       if (access) {
+  restoreSession();
+  startRefreshLoopOnce(navigateToScreen);
+  sseManager.start(access);
 
-          startRefreshLoopOnce(navigateToScreen); // chạy loop 1 lần
-          sseManager.start(access);
-
-          // 🔥 Refresh ngay để chắc token mới nhất & gắn vào SSE
-          try { await doRefreshToken(navigateToScreen, { force: true }); } catch {}
-        } else {
+  const expiresAt = parseInt(await AsyncStorage.getItem(K_EXPIRES_AT), 10) || 0;
+  const now = Date.now();
+  if (!expiresAt || expiresAt - now < 10 * 60 * 1000) {
+    // chỉ force refresh nếu sắp hết hạn (<10 phút)
+    try { await doRefreshToken(navigateToScreen, { force: true }); } catch {}
+  }
+}
+else {
           navigateToScreen('Login');
         }
       } catch (e) {
@@ -261,17 +265,20 @@ export default function App() {
   }, [navigateToScreen, restoreSession]);
 
   // AppState: foreground → refresh ngay; background → dừng loop
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', async (state) => {
-      if (state === 'active') {
-        try { await doRefreshToken(navigateToScreen, { force: true }); } catch {}
-        startRefreshLoopOnce(navigateToScreen);
-      } else {
-        clearRefreshLoop();
-      }
-    });
-    return () => { try { sub.remove(); } catch {} };
-  }, [navigateToScreen]);
+ useEffect(() => {
+  const sub = AppState.addEventListener('change', async (state) => {
+    if (state === 'active') {
+      // Đừng force refresh mỗi lần foreground
+      try { await doRefreshToken(navigateToScreen, { force: false }); console.log('⏱ Last refresh:', new Date(lastRefreshAt).toLocaleTimeString());
+ } catch {}
+      startRefreshLoopOnce(navigateToScreen);
+    } else {
+      clearRefreshLoop();
+    }
+  });
+  return () => { try { sub.remove(); } catch {} };
+}, [navigateToScreen]);
+
 
   const handleLogin = async (userData = null) => {
     login(userData);
