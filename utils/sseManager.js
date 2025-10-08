@@ -67,10 +67,10 @@ class SSEManager {
 
   on(listener) {
     this.listeners.add(listener);
-    log('on(listener) → total listeners =', this.listeners.size);
+    // 🔥 BỎ LOG: log('on(listener) → total listeners =', this.listeners.size);
     return () => {
       this.listeners.delete(listener);
-      log('off(listener) → total listeners =', this.listeners.size);
+      // 🔥 BỎ LOG: log('off(listener) → total listeners =', this.listeners.size);
     };
   }
 
