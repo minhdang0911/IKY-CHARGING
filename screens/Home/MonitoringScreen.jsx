@@ -3,7 +3,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Pressable,
   FlatList, Platform, ToastAndroid, Alert, Image,
-  Modal, PermissionsAndroid, Linking
+  Modal, PermissionsAndroid, Linking, ScrollView
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -236,7 +236,14 @@ function WebModal({ visible, onRequestClose, children }) {
   return (
     <Pressable style={styles.modalOverlayAbs} onPress={onRequestClose}>
       <View style={styles.modalContainer} onStartShouldSetResponder={() => true}>
-        {children}
+        <ScrollView
+          style={styles.modalScrollWeb}
+          contentContainerStyle={styles.modalScrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {children}
+          <View style={{ height: 16 }} />
+        </ScrollView>
       </View>
     </Pressable>
   );
@@ -247,6 +254,7 @@ function ModalContent({
   t, headerName, modalPort,
   buildCheckoutUrl, openLink, saveQrPng, qrRef
 }) {
+  if (!modalPort) return null;
   return (
     <>
       {/* Header */}
@@ -257,72 +265,68 @@ function ModalContent({
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.modalTitle}>{t('portDetail')}</Text>
-            {!!modalPort && (
-              <Text style={styles.modalSubtitle}>
-                {headerName} • {t('port')} {modalPort?.name} • {t(modalPort?.portTextStatus)}
-              </Text>
-            )}
+            <Text style={styles.modalSubtitle}>
+              {headerName} • {t('port')} {modalPort?.name} • {t(modalPort?.portTextStatus)}
+            </Text>
           </View>
         </View>
       </View>
 
       {/* Content */}
-      {!!modalPort && (
-        <View style={styles.modalContent}>
-          <View style={styles.modalInfoCard}>
-            {[
-              ['Port', `${t('port')} ${modalPort.name}`],
-              [t('status'), t(modalPort.portTextStatus)],
-              [t('start'), modalPort.start],
-              [t('end'), modalPort.end],
-              [t('power'), formatPowerKW(modalPort.kw)],
-              [t('energy'), formatEnergyKWh(modalPort.kwh)],
-            ].map(([k, v], i) => (
-              <View key={k} style={[styles.modalInfoRow, i === 0 && { borderTopWidth: 0 }]}>
-                <Text style={styles.modalInfoKey}>{k}</Text>
-                <Text style={styles.modalInfoValue}>{v}</Text>
-              </View>
-            ))}
-          </View>
+      <View style={styles.modalContent}>
+        <View style={styles.modalInfoCard}>
+          {[
+            ['Port', `${t('port')} ${modalPort.name}`],
+            [t('status'), t(modalPort.portTextStatus)],
+            [t('start'), modalPort.start],
+            [t('end'), modalPort.end],
+            [t('power'), formatPowerKW(modalPort.kw)],
+            [t('energy'), formatEnergyKWh(modalPort.kwh)],
+          ].map(([k, v], i) => (
+            <View key={k} style={[styles.modalInfoRow, i === 0 && { borderTopWidth: 0 }]}>
+              <Text style={styles.modalInfoKey}>{k}</Text>
+              <Text style={styles.modalInfoValue}>{v}</Text>
+            </View>
+          ))}
+        </View>
 
-          {/* ==== QR AREA ==== */}
-          <Text style={styles.qrHint}>{t('tapQRHint')}</Text>
-          <View style={styles.qrWrap}>
+        {/* ==== QR AREA ==== */}
+        <Text style={styles.qrHint}>{t('tapQRHint')}</Text>
+        <View style={styles.qrWrap}>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
+          >
+            <View style={styles.qrBox}>
+              <QRCode
+                value={buildCheckoutUrl(modalPort.portNumber)}
+                size={200}
+                quietZone={10}
+                getRef={(c) => { qrRef.current = c; }}
+              />
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.modalActions}>
             <TouchableOpacity
-              activeOpacity={0.9}
+              style={styles.btnPrimary}
               onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
             >
-              <View style={styles.qrBox}>
-                <QRCode
-                  value={buildCheckoutUrl(modalPort.portNumber)}
-                  size={200}
-                  quietZone={10}
-                  getRef={(c) => { qrRef.current = c; }}
-                />
-              </View>
+              <Text style={styles.btnPrimaryText}>{t('openLink')}</Text>
             </TouchableOpacity>
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.btnPrimary}
-                onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
-              >
-                <Text style={styles.btnPrimaryText}>{t('openLink')}</Text>
-              </TouchableOpacity>
+            <View style={{ width: 10 }} />
 
-              <View style={{ width: 10 }} />
-
-              <TouchableOpacity
-                style={styles.btnGhost}
-                onPress={saveQrPng}
-              >
-                <Text style={styles.btnGhostText}>{t('saveQR')}</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity
+              style={styles.btnGhost}
+              onPress={saveQrPng}
+            >
+              <Text style={styles.btnGhostText}>{t('saveQR')}</Text>
+            </TouchableOpacity>
           </View>
-          {/* ==== /QR AREA ==== */}
         </View>
-      )}
+        {/* ==== /QR AREA ==== */}
+      </View>
     </>
   );
 }
@@ -357,16 +361,12 @@ export default function MonitoringScreen() {
   const [showModal, setShowModal] = useState(false);
   const [modalPort, setModalPort] = useState(null);
 
-  // ✅ Hàm mở/đóng modal ĐẶT TRONG COMPONENT (đúng scope state)
+  // ✅ Hàm mở/đóng modal
   const handleOpenPortModal = useCallback((port) => {
-    console.log('[Monitoring] OPEN DETAIL:', port?.id, port);
     setModalPort(port || null);
     setShowModal(Boolean(port));
   }, []);
-  const handleClosePortModal = useCallback(() => {
-    console.log('[Monitoring] CLOSE DETAIL');
-    setShowModal(false);
-  }, []);
+  const handleClosePortModal = useCallback(() => setShowModal(false), []);
 
   // QR ref (trong modal)
   const qrRef = useRef(null);
@@ -635,7 +635,7 @@ export default function MonitoringScreen() {
   })();
 
   /* ===== helpers QR ===== */
-  const [modalPortState, setModalPortState] = useState(null); // giữ nguyên cho compat nếu cần
+  const [modalPortState, setModalPortState] = useState(null); // giữ cho compat (nếu bạn dùng chỗ khác)
   const buildCheckoutUrl = useCallback((portNumber) => {
     const agentId = selectedDevice?.agentId || '';
     const deviceId = selectedDevice?.deviceId || '';
@@ -649,40 +649,36 @@ export default function MonitoringScreen() {
 
   const saveQrPng = useCallback(async () => {
     const portCtx = modalPort || modalPortState;
-    if (!portCtx) {
-      toast(t('toastNoPort'));
+    if (!portCtx) { toast(t('toastNoPort')); return; }
+
+    // ⚡ WEB: vẽ QR lên canvas -> tải PNG
+    if (Platform.OS === 'web') {
+      try {
+        const url = buildCheckoutUrl(portCtx.portNumber);
+        const QRCodeLib = await import('qrcode'); // dynamic import
+        const canvas = document.createElement('canvas');
+        const size = 300;
+        canvas.width = size; canvas.height = size;
+        await QRCodeLib.toCanvas(canvas, url, { width: size, margin: 1 });
+        const pngUrl = canvas.toDataURL('image/png');
+        const a = document.createElement('a');
+        a.href = pngUrl;
+        a.download = `qr_${selectedDevice?.code || 'device'}_port${portCtx.portNumber}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        toast(t('toastSaved'));
+      } catch (err) {
+        console.error('saveQrPng web error', err);
+        toast(err?.message || 'Save error');
+      }
       return;
     }
 
+    // ⚡ Native: dùng toDataURL + RNFS + CameraRoll
     try {
-      if (Platform.OS === 'web') {
-        if (!qrRef.current) { toast(t('toastQrNotReady')); return; }
-        qrRef.current.toDataURL((base64) => {
-          try {
-            const a = document.createElement('a');
-            a.href = 'data:image/png;base64,' + base64;
-            a.download = `qr_${selectedDevice?.code || 'device'}_port${portCtx.portNumber}.png`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          } catch (err) {
-            console.error(err);
-            toast('' + (err?.message || err));
-          }
-        });
-        return;
-      }
+      if (!qrRef.current) { toast(t('toastQrNotReady')); return; }
 
-      // iOS permission placeholder
-      if (Platform.OS === 'ios') {
-        const permission = await PermissionsAndroid.request('ios.permission.PHOTO_LIBRARY_ADD_ONLY');
-        if (permission === 'denied') {
-          toast(t('toastNeedPhoto'));
-          return;
-        }
-      }
-
-      // Android < 29 cần WRITE_EXTERNAL_STORAGE
       if (Platform.OS === 'android' && Platform.Version < 29) {
         const granted = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
@@ -693,36 +689,24 @@ export default function MonitoringScreen() {
         }
       }
 
-      if (!qrRef.current) {
-        toast(t('toastQrNotReady'));
-        return;
-      }
-
       qrRef.current.toDataURL(async (base64Data) => {
         try {
           const fname = `qr_${selectedDevice?.code || 'device'}_port${portCtx.portNumber}_${Date.now()}.png`;
-
-          // save temp
           const tempPath = `${RNFS.CachesDirectoryPath}/${fname}`;
           await RNFS.writeFile(tempPath, base64Data, 'base64');
-
-          // save to Photos/Gallery
           await CameraRoll?.save(tempPath, { type: 'photo' });
-
-          // cleanup
           await RNFS.unlink(tempPath).catch(() => {});
-
           toast(t('toastSaved'));
-        } catch (writeError) {
-          console.error('Save error:', writeError);
-          toast('' + (writeError?.message || writeError));
+        } catch (err) {
+          console.error('Save error:', err);
+          toast(err?.message || 'Save failed');
         }
       });
-    } catch (error) {
-      console.error('saveQrPng error:', error);
-      toast('' + (error?.message || error));
+    } catch (err) {
+      console.error('saveQrPng native error:', err);
+      toast(err?.message || 'Save failed');
     }
-  }, [modalPort, modalPortState, selectedDevice, toast, t]);
+  }, [modalPort, modalPortState, selectedDevice, toast, t, buildCheckoutUrl]);
 
   /* ===== UI ===== */
   const renderItem = useCallback(({ item }) => {
@@ -881,7 +865,7 @@ export default function MonitoringScreen() {
       {/* MODAL / WEB-MODAL */}
       <ModalLike {...modalProps}>
         {Platform.OS === 'web' ? (
-          // WebModal đã có overlay + container
+          // WebModal đã có overlay + container + ScrollView
           <ModalContent
             t={t}
             headerName={selectedDevice?.name || ''}
@@ -892,18 +876,25 @@ export default function MonitoringScreen() {
             qrRef={qrRef}
           />
         ) : (
-          // Native: tự bọc overlay nền mờ
+          // Native: bọc ScrollView để cuộn
           <Pressable style={styles.modalOverlay} onPress={handleClosePortModal}>
             <View style={styles.modalContainer} onStartShouldSetResponder={() => true}>
-              <ModalContent
-                t={t}
-                headerName={selectedDevice?.name || ''}
-                modalPort={modalPort}
-                buildCheckoutUrl={buildCheckoutUrl}
-                openLink={openLink}
-                saveQrPng={saveQrPng}
-                qrRef={qrRef}
-              />
+              <ScrollView
+                style={styles.modalScrollNative}
+                contentContainerStyle={styles.modalScrollContent}
+                keyboardShouldPersistTaps="handled"
+              >
+                <ModalContent
+                  t={t}
+                  headerName={selectedDevice?.name || ''}
+                  modalPort={modalPort}
+                  buildCheckoutUrl={buildCheckoutUrl}
+                  openLink={openLink}
+                  saveQrPng={saveQrPng}
+                  qrRef={qrRef}
+                />
+                <View style={{ height: 16 }} />
+              </ScrollView>
             </View>
           </Pressable>
         )}
@@ -1004,7 +995,7 @@ const styles = StyleSheet.create({
     inset: 0,
     backgroundColor: 'rgba(0,0,0,0.5)',
     padding: 20,
-    zIndex: 2147483647, // max để khỏi bị layer khác đè
+    zIndex: 2147483647,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1014,13 +1005,30 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     width: '100%',
     maxWidth: 450,
-    maxHeight: '85%',
+    ...Platform.select({
+      web: { maxHeight: '90vh', overflow: 'hidden' },
+      default: { maxHeight: '90%', overflow: 'hidden' },
+    }),
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.25,
     shadowRadius: 20,
     elevation: 10,
   },
+
+  // Khu vực cuộn bên trong modal
+  modalScrollWeb: {
+    width: '100%',
+    maxHeight: '90vh',
+  },
+  modalScrollNative: {
+    flexGrow: 0,
+    maxHeight: '90%',
+  },
+  modalScrollContent: {
+    paddingBottom: 24,
+  },
+
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1108,12 +1116,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flex: 1,
   },
-  btnPrimaryText: { color: '#fff', fontWeight: '600',fontSize:14 },
+  btnPrimaryText: { color: '#fff', fontWeight: '600', fontSize:14 },
 
   btnGhost: {
     borderWidth: 1, borderColor: '#2563EB', borderRadius: 12,
     paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     flex: 1,
   },
-  btnGhostText: { color: '#2563EB', fontWeight: '600',fontSize:14 },
+  btnGhostText: { color: '#2563EB', fontWeight: '600', fontSize:14 },
 });
