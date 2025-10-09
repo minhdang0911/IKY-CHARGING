@@ -1,6 +1,6 @@
 // components/BottomTabNavigation.jsx
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -24,6 +24,9 @@ const STRINGS = {
 };
 
 const BottomTabNavigation = ({ currentScreen, navigateToScreen, hidden = false }) => {
+  // expose height để screens khác dùng cộng paddingBottom
+  BottomTabNavigation.TAB_BAR_HEIGHT = 72;
+
   const [lang, setLang] = useState('vi');
   const L = useMemo(() => STRINGS[lang] || STRINGS.vi, [lang]);
 
@@ -38,7 +41,7 @@ const BottomTabNavigation = ({ currentScreen, navigateToScreen, hidden = false }
 
   if (hidden) return null;
 
-  // Hai tab đầu chuyển sang dạng text badge: GS / TQ
+  // Hai tab đầu dùng text badge: GS / TQ
   const tabs = [
     { id: 'Monitoring', type: 'text', text: 'GS' },
     { id: 'Journey', type: 'text', text: 'TQ' },
@@ -46,8 +49,13 @@ const BottomTabNavigation = ({ currentScreen, navigateToScreen, hidden = false }
     { id: 'Information', type: 'icon', icon: 'info' },
   ];
 
+  const containerStyle = [
+    styles.container,
+    Platform.OS === 'web' ? styles.fixedWeb : styles.fixedNative,
+  ];
+
   return (
-    <View style={styles.container}>
+    <View style={containerStyle}>
       {tabs.map((tab) => {
         const isActive = currentScreen === tab.id;
 
@@ -94,14 +102,24 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3,
     elevation: 5,
+  },
 
-    // ✅ Cố định đáy màn hình (hiệu quả trên web)
+  // dính đáy – web dùng fixed
+  fixedWeb: {
     position: 'fixed',
-    bottom: 0,
     left: 0,
     right: 0,
+    bottom: 0,
     width: '100%',
-    zIndex: 99,
+    zIndex: 999,
+  },
+  // native dùng absolute
+  fixedNative: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 999,
   },
 
   tabItem: {

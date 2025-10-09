@@ -101,19 +101,27 @@ export default function DeviceList({ navigateToScreen }) {
     } catch {}
   }, []);
 
-  const fetchList = useCallback(async (toastOnErr=false) => {
-    try {
-      const token = await AsyncStorage.getItem('access_token');
-      if (!token) return;
-      const data = await getDevices(token);
-      const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
-      if (!mounted.current) return;
-      setRaw(list);
-      await AsyncStorage.setItem(K_DEVICES, JSON.stringify(list));
-    } catch (e) {
-      if (toastOnErr) showMessage(e?.message || 'Không tải được danh sách');
-    }
-  }, []);
+const fetchList = useCallback(async (toastOnErr = false) => {
+  try {
+    const token = await AsyncStorage.getItem('access_token');
+    if (!token) return;
+
+    const data = await getDevices(token);
+    const list = Array.isArray(data?.data)
+      ? data.data
+      : (Array.isArray(data) ? data : []);
+
+     
+    list.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+    if (!mounted.current) return;
+    setRaw(list);
+    await AsyncStorage.setItem(K_DEVICES, JSON.stringify(list));
+  } catch (e) {
+    if (toastOnErr) showMessage(e?.message || 'Không tải được danh sách');
+  }
+}, []);
+
 
   useEffect(() => {
     (async()=>{
@@ -155,8 +163,8 @@ export default function DeviceList({ navigateToScreen }) {
       };
     }).sort((a, b) => {
       const ta = a.createdAt ? a.createdAt.getTime() : 0;
-      const tb = b.createdAt ? b.createdAt.getTime() : 0;
-      return tb - ta; // mới → cũ cho web
+  const tb = b.createdAt ? b.createdAt.getTime() : 0;
+  return ta - tb; // cũ → mới (1 → 8)
     });
   }, [raw, lang]);
 

@@ -405,7 +405,7 @@ export default function Extend({ navigateToScreen, screenData }) {
               style={[styles.btnGhost, { flex: 1 }]}
               onPress={() => navigateToScreen('historyExtend')}
             >
-              <Icon name="history" size={18} color={UI.accent} style={{ marginRight: 6 }} />
+              
               <Text style={styles.btnGhostText}>Xem lịch sử đơn hàng</Text>
             </TouchableOpacity>
 
@@ -418,7 +418,7 @@ export default function Extend({ navigateToScreen, screenData }) {
                 setSelectedPayment(null);
               }}
             >
-              <Icon name="add-circle-outline" size={18} color={UI.accent} style={{ marginRight: 6 }} />
+              
               <Text style={styles.btnGhostText}>Tạo đơn khác</Text>
             </TouchableOpacity>
           </View>
@@ -452,10 +452,17 @@ export default function Extend({ navigateToScreen, screenData }) {
 
       <View style={{ padding: 16, flex: 1 }}>
         {/* Device — CHỈ HIỆN NAME */}
-        <View style={styles.deviceBar}>
-          <Icon name="electrical-services" size={18} color={UI.accent} />
-          <Text style={styles.deviceText}>{device?.name || 'Thiết bị'}</Text>
-        </View>
+       <View style={styles.deviceBar}>
+  
+  <Text
+    style={styles.deviceText}
+    numberOfLines={1}
+    ellipsizeMode="tail"
+  >
+    {device?.name || 'Thiết bị'}
+  </Text>
+</View>
+
 
         {/* Selects */}
         <View style={{ marginTop: 12 }}>
@@ -543,7 +550,7 @@ export default function Extend({ navigateToScreen, screenData }) {
                 </>
               ) : (
                 <>
-                  <Icon name="shopping-cart" size={18} color="#fff" style={{ marginRight: 8 }} />
+                  
                   <Text style={styles.btnText}>Tạo đơn hàng</Text>
                 </>
               )}
