@@ -63,26 +63,43 @@ export default function InformationScreen({ logout, navigateToScreen }) {
     })();
   }, []);
 
-  async function handleLogoutPress() {
-    try {
-      const token = await AsyncStorage.getItem('access_token');
-      if (token) {
-        await fetch(`${API_URL}/api/auth/logout`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        }).catch(() => {});
-      }
-    } finally {
-      await AsyncStorage.multiRemove([
-        'access_token',
-        'refresh_token',
-        'expires_at',
-        'user_oid',
-        'username',
-      ]);
-      logout && logout();
+ async function handleLogoutPress() {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s cho gọn
+
+  try {
+    const [accessToken, refreshToken] = await Promise.all([
+      AsyncStorage.getItem('access_token'),
+      AsyncStorage.getItem('refresh_token'),
+    ]);
+
+    if (accessToken) {
+      await fetch(`${API_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({
+          accessToken,   // truyền vào body như m yêu cầu
+          refreshToken,  // truyền luôn refreshToken
+        }),
+        signal: controller.signal,
+      }).catch(() => {}); // kệ lỗi mạng lúc logout, vẫn dọn local
     }
+  } finally {
+    clearTimeout(timeoutId);
+    await AsyncStorage.multiRemove([
+      'access_token',
+      'refresh_token',
+      'expires_at',
+      'user_oid',
+      'username',
+    ]);
+    logout && logout();
   }
+}
 
   return (
     <SafeAreaView style={styles.wrap}>

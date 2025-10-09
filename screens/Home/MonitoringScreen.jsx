@@ -121,7 +121,7 @@ const STATUS_COLOR = { ready: '#16a34a', charging: '#2563eb', offline: '#ef4444'
 const normalize = (s) => String(s || '').trim().toLowerCase();
 
 async function getAccessTokenSafe() {
-  const keys = ['accessToken', 'ACCESS_TOKEN', 'token', 'auth_token', 'access_token'];
+  const keys = ['access_token'];
   for (const k of keys) { const v = await AsyncStorage.getItem(k); if (v) return v; }
   return null;
 }
