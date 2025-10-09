@@ -8,6 +8,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { getPublicPricingPlans, createOrder, createOrderCash } from '../../apis/payment';
+import { getDevices } from '../../apis/devices'; // ⬅️ dùng để refetch device sau khi tạo đơn
 
 // logos
 import momologo from '../../assets/img/momo.png';
@@ -25,7 +26,8 @@ const UI = {
   good: '#16A34A',
 };
 
-const IDLE_STATES = ['idle', 'available', 'free', 'ready', 'online'];
+// Chỉ coi là rảnh khi thuộc nhóm này
+const IDLE_STATES = ['idle', 'available', 'free', 'ready'];
 
 /* ================= Small utils ================= */
 const onlyMessage = (err) => {
@@ -65,7 +67,6 @@ const CustomAlert = ({ visible, title = 'Thông báo', message = '', onClose }) 
 };
 
 /* ============== Reusable Custom Select (centered modal) ============== */
-/* Thêm renderValue / renderOption để hiện logo */
 const CustomSelect = ({
   label,
   placeholder = 'Chọn…',
@@ -77,8 +78,8 @@ const CustomSelect = ({
   searchable = true,
   rightIcon = 'expand-more',
   disabled = false,
-  renderValue,    // (item) => JSX, dùng cho payment hiển thị logo + tên
-  renderOption,   // (item, isOn) => JSX, dùng trong modal list
+  renderValue,
+  renderOption,
 }) => {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -181,7 +182,8 @@ const CustomSelect = ({
 
 /* ================= MAIN ================= */
 export default function Extend({ navigateToScreen, screenData }) {
-  const device = screenData?.device || {};
+  // ⬇️ biến device thành state để có thể cập nhật realtime
+  const [device, setDevice] = useState(screenData?.device || {});
   const agentId = device?.agent_id?._id || '';
   const deviceId = device?._id || '';
   const ports = Array.isArray(device?.ports) ? device.ports : [];
@@ -248,6 +250,34 @@ export default function Extend({ navigateToScreen, screenData }) {
     })
   ).current;
 
+  /* ===== REFRESH DEVICE ===== */
+  const refreshDevice = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem('access_token');
+      if (!token || !deviceId) return;
+      const data = await getDevices(token);
+      const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+      const fresh = list.find(d => (d?._id === deviceId) || (d?.device_code === device?.device_code));
+      if (fresh) {
+        setDevice(fresh);
+        // nếu cổng đã bận thì clear lựa chọn cổng cũ
+        if (selectedPort) {
+          const latestPort = (fresh.ports || []).find(p => String(p.portNumber) === String(selectedPort.portNumber));
+          const latestStatus = String(latestPort?.status || '').toLowerCase();
+          if (!IDLE_STATES.includes(latestStatus)) {
+            setSelectedPort(null);
+          }
+        }
+      }
+    } catch {
+      // im lặng, không phá UI
+    }
+  }, [deviceId, device?.device_code, selectedPort]);
+
+  // refresh ngay khi vào màn hoặc khi deviceId đổi
+  useEffect(() => { refreshDevice(); }, [refreshDevice]);
+
+  /* ===== OPTIONS ===== */
   const idlePortOptions = useMemo(
     () =>
       ports
@@ -288,6 +318,22 @@ export default function Extend({ navigateToScreen, screenData }) {
 
   useEffect(() => { fetchPlans(); }, [fetchPlans]);
 
+  /* ===== Validate port before create (tránh race) ===== */
+  const ensurePortStillIdle = useCallback(async (portNumber) => {
+    try {
+      const token = await AsyncStorage.getItem('access_token');
+      if (!token || !deviceId) return true; // không block
+      const data = await getDevices(token);
+      const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
+      const fresh = list.find(d => (d?._id === deviceId) || (d?.device_code === device?.device_code));
+      const p = fresh?.ports?.find(pp => String(pp.portNumber) === String(portNumber));
+      const st = String(p?.status || '').toLowerCase();
+      return IDLE_STATES.includes(st);
+    } catch {
+      return true;
+    }
+  }, [deviceId, device?.device_code]);
+
   /* ===== Create Order (branch by method) ===== */
   const handleCreateOrder = useCallback(async () => {
     if (!selectedPlan || !selectedPort || !selectedPayment) {
@@ -295,13 +341,23 @@ export default function Extend({ navigateToScreen, screenData }) {
       setShowAlert(true);
       return;
     }
+
+    // check lại port còn idle không
+    const ok = await ensurePortStillIdle(selectedPort.portNumber);
+    if (!ok) {
+      setAlertMsg('Cổng vừa chuyển trạng thái. Vui lòng chọn lại cổng khác.');
+      setShowAlert(true);
+      await refreshDevice();
+      return;
+    }
+
     try {
       setCreating(true);
       const token = await AsyncStorage.getItem('access_token');
 
       const basePayload = {
-        agent_id: agentId,
-        device_id: deviceId,
+        agent_id: device?.agent_id?._id || '',
+        device_id: device?._id || '',
         pricing_plan_id: selectedPlan.id,
         portNumber: selectedPort.portNumber,
         ...(phone ? { phone } : {}),
@@ -337,7 +393,7 @@ export default function Extend({ navigateToScreen, screenData }) {
     } finally {
       setCreating(false);
     }
-  }, [selectedPlan, selectedPort, selectedPayment, phone, agentId, deviceId, device]);
+  }, [selectedPlan, selectedPort, selectedPayment, phone, device, ensurePortStillIdle, refreshDevice]);
 
   /* ===== Success Screen ===== */
   if (orderSuccess) {
@@ -405,20 +461,19 @@ export default function Extend({ navigateToScreen, screenData }) {
               style={[styles.btnGhost, { flex: 1 }]}
               onPress={() => navigateToScreen('historyExtend')}
             >
-              <Icon name="history" size={18} color={UI.accent} style={{ marginRight: 6 }} />
               <Text style={styles.btnGhostText}>Xem lịch sử đơn hàng</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.btnGhost, { flex: 1 }]}
-              onPress={() => {
+              onPress={async () => {
                 setOrderSuccess(null);
                 setSelectedPlan(null);
                 setSelectedPort(null);
                 setSelectedPayment(null);
+                await refreshDevice(); // ⬅️ load lại trạng thái ports trước khi tạo đơn mới
               }}
             >
-              <Icon name="add-circle-outline" size={18} color={UI.accent} style={{ marginRight: 6 }} />
               <Text style={styles.btnGhostText}>Tạo đơn khác</Text>
             </TouchableOpacity>
           </View>
@@ -443,18 +498,22 @@ export default function Extend({ navigateToScreen, screenData }) {
     >
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={goBack}>
-          <Icon name="arrow-back" size={24} color="#fff" />
+        <TouchableOpacity onPress={goBack} style={{ padding: 6 }}>
+          <Text style={{fontSize: 30, color: '#fff'}}>{'‹'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Tạo đơn hàng</Text>
-        <View style={{ width: 24 }} />
+        {/* Reload button */}
+        <TouchableOpacity onPress={refreshDevice} style={{ padding: 6 }}>
+          <Icon name="refresh" size={22} color="#fff" />
+        </TouchableOpacity>
       </View>
 
       <View style={{ padding: 16, flex: 1 }}>
         {/* Device — CHỈ HIỆN NAME */}
         <View style={styles.deviceBar}>
-          <Icon name="electrical-services" size={18} color={UI.accent} />
-          <Text style={styles.deviceText}>{device?.name || 'Thiết bị'}</Text>
+          <Text style={styles.deviceText} numberOfLines={1} ellipsizeMode="tail">
+            {device?.name || 'Thiết bị'}
+          </Text>
         </View>
 
         {/* Selects */}
@@ -543,11 +602,15 @@ export default function Extend({ navigateToScreen, screenData }) {
                 </>
               ) : (
                 <>
-                  <Icon name="shopping-cart" size={18} color="#fff" style={{ marginRight: 8 }} />
                   <Text style={styles.btnText}>Tạo đơn hàng</Text>
                 </>
               )}
             </TouchableOpacity>
+
+            {/* Nút cập nhật trạng thái cổng thủ công */}
+            {/* <TouchableOpacity style={[styles.btnGhost, { marginTop: 10 }]} onPress={refreshDevice}>
+              <Text style={styles.btnGhostText}>Cập nhật trạng thái cổng</Text>
+            </TouchableOpacity> */}
           </View>
         </View>
       </View>
@@ -584,8 +647,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between'
   },
-  headerTitle: { flex: 1, textAlign: 'center', color: '#fff', fontSize: 18, fontWeight: '800' },
+  headerTitle: { textAlign: 'center', color: '#fff', fontSize: 18, fontWeight: '800' },
 
   label: { fontSize: 13, color: UI.sub, marginBottom: 6 },
   selectBox: {
@@ -701,7 +765,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: UI.accent, borderRadius: 12, paddingVertical: 10,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flex: 1
   },
-  btnGhostText: { color: UI.accent, fontWeight: '500',fontSize:12 },
+  btnGhostText: { color: UI.accent, fontWeight: '500', fontSize: 12 },
 
   // CustomAlert styles
   alertBackdrop: {
