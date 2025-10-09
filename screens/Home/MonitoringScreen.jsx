@@ -154,6 +154,16 @@ function formatEnergyKWh(n) {
   return a < 1 ? `${Math.round(v * 1000)} Wh` : `${trim0(v, 2)} kWh`;
 }
 
+
+function slugify(s) {
+  return String(s || '')
+   .normalize('NFD')
+   .replace(/[\u0300-\u036f]/g, '')
+   .trim()
+   .replace(/\s+/g, '-')                  
+   .replace(/-+/g, '-')                    
+}
+
 /* ====== Cache keys (SWR) ====== */
 const K_MONI_DEVICES_MENU = 'moni_devices_menu';
 const K_MONI_SELECTED_ID  = 'moni_selected_id';
@@ -181,7 +191,9 @@ function mapPortStatusToVisual(s) {
 
 /* ====== ADAPTER (web rule) ====== */
 function adaptDeviceInfoToUI(info, sessionsDev, lang) {
+   
   const name = info?.name || info?.device_code || '—';
+   const agentName = (typeof info?.agent_id === 'object' ? info?.agent_id?.name : '') || '';
   const ports = Array.isArray(info?.ports) ? info.ports : [];
   const deviceOffline = isDeviceOffline(info);
  
@@ -232,6 +244,7 @@ if (deviceOffline) {
       end: formatDateTime(sess?.endTime, lang),
       kw: p?.kw ?? 0,
       kwh: sess?.energy_used_kwh ?? 0,
+      
     };
   });
 
@@ -239,6 +252,7 @@ if (deviceOffline) {
     id: info?._id ?? info?.device_code ?? 'unknown',
     deviceId: info?._id ?? '',
     agentId: info?.agent_id?._id ?? info?.agent_id ?? '',
+    agentName,
     code: info?.device_code ?? '',
     name,
     ports: uiPorts,
@@ -735,10 +749,16 @@ function ModalContent({
     try { await Linking.openURL(url); } catch { toast(t('toastOpenLinkFail')); }
   }, [toast, t]);
 
+
+  console.log('selectedDevice:', selectedDevice);
 const saveQrPng = useCallback(async () => {
   if (!modalPort) { toast(t('toastNoPort')); return; }
 
-  const fname = `qr_${selectedDevice?.code || 'device'}_port${modalPort.portNumber}_${Date.now()}.png`;
+ const agent = selectedDevice?.agentName || 'Agent';
+ const device = selectedDevice?.name || selectedDevice?.code || 'Device';
+ const port = modalPort.portNumber != null ? `cổng ${modalPort.portNumber}` : 'c?';
+ const baseLabel = `${device}-${port}`;
+ const fname = `${slugify(baseLabel)}.png`;
 
   if (Platform.OS === 'web') {
     try {
