@@ -113,6 +113,9 @@ const useI18n = () => {
   return { t, lang };
 };
 
+
+
+
 /* ========== helpers ========== */
 const STATUS_COLOR = { ready: '#16a34a', charging: '#2563eb', offline: '#ef4444', fault: '#f59e0b' };
 const normalize = (s) => String(s || '').trim().toLowerCase();
@@ -291,7 +294,7 @@ export default function MonitoringScreen() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
-  const [headerHeight, setHeaderHeight] = useState(0);
+ 
 
   const [devicesMenu, setDevicesMenu] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -301,6 +304,8 @@ export default function MonitoringScreen() {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const baseDeviceRef = useRef(null);
+  const HEADER_DEFAULT_H = 64;
+const [headerHeight, setHeaderHeight] = useState(HEADER_DEFAULT_H);
 
   const toast = useCallback((msg) => {
     if (Platform.OS === 'android') ToastAndroid.show(msg, ToastAndroid.SHORT);
@@ -468,7 +473,7 @@ function ModalContent({
 }) {
   return (
     <>
-      {/* Header */}
+      {/* Header cố định */}
       <View style={styles.modalHeader}>
         <View style={styles.modalHeaderLeft}>
           <View style={styles.modalIconBadge}>
@@ -485,66 +490,72 @@ function ModalContent({
         </View>
       </View>
 
-      {/* Content */}
-      {!!modalPort && (
-        <View style={styles.modalContent}>
-          <View style={styles.modalInfoCard}>
-            {[
-              ['Port', `${t('port')} ${modalPort.name}`],
-              [t('status'), t(modalPort.portTextStatus)],
-              [t('start'), modalPort.start],
-              [t('end'), modalPort.end],
-              [t('power'), formatPowerKW(modalPort.kw)],
-              [t('energy'), formatEnergyKWh(modalPort.kwh)],
-            ].map(([k, v], i) => (
-              <View key={k} style={[styles.modalInfoRow, i === 0 && { borderTopWidth: 0 }]}>
-                <Text style={styles.modalInfoKey}>{k}</Text>
-                <Text style={styles.modalInfoValue}>{v}</Text>
-              </View>
-            ))}
-          </View>
+      {/* Phần có thể kéo */}
+      <ScrollView
+        style={styles.modalScroll}
+        contentContainerStyle={styles.modalScrollContent}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+        showsVerticalScrollIndicator
+        bounces={false}
+      >
+        {!!modalPort && (
+          <View style={styles.modalContent}>
+            <View style={styles.modalInfoCard}>
+              {[
+                ['Port', `${t('port')} ${modalPort.name}`],
+                [t('status'), t(modalPort.portTextStatus)],
+                [t('start'), modalPort.start],
+                [t('end'), modalPort.end],
+                [t('power'), formatPowerKW(modalPort.kw)],
+                [t('energy'), formatEnergyKWh(modalPort.kwh)],
+              ].map(([k, v], i) => (
+                <View key={k} style={[styles.modalInfoRow, i === 0 && { borderTopWidth: 0 }]}>
+                  <Text style={styles.modalInfoKey}>{k}</Text>
+                  <Text style={styles.modalInfoValue}>{v}</Text>
+                </View>
+              ))}
+            </View>
 
-          {/* ==== QR AREA ==== */}
-          <Text style={styles.qrHint}>{t('tapQRHint')}</Text>
-          <View style={styles.qrWrap}>
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
-            >
-              <View style={styles.qrBox}>
-                <QRCode
-                  value={buildCheckoutUrl(modalPort.portNumber)}
-                  size={200}
-                  quietZone={10}
-                  getRef={(c) => { qrRef.current = c; }}
-                />
-              </View>
-            </TouchableOpacity>
+            <Text style={styles.qrHint}>{t('tapQRHint')}</Text>
 
-            <View style={styles.modalActions}>
+            <View style={styles.qrWrap}>
               <TouchableOpacity
-                style={styles.btnPrimary}
+                activeOpacity={0.9}
                 onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
               >
-                <Text style={styles.btnPrimaryText}>{t('openLink')}</Text>
+                <View style={styles.qrBox}>
+                  <QRCode
+                    value={buildCheckoutUrl(modalPort.portNumber)}
+                    size={200}
+                    quietZone={10}
+                    getRef={(c) => { qrRef.current = c; }}
+                  />
+                </View>
               </TouchableOpacity>
 
-              <View style={{ width: 10 }} />
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={styles.btnPrimary}
+                  onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
+                >
+                  <Text style={styles.btnPrimaryText}>{t('openLink')}</Text>
+                </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.btnGhost}
-                onPress={saveQrPng}
-              >
-                <Text style={styles.btnGhostText}>{t('saveQR')}</Text>
-              </TouchableOpacity>
+                <View style={{ width: 10 }} />
+
+                <TouchableOpacity style={styles.btnGhost} onPress={saveQrPng}>
+                  <Text style={styles.btnGhostText}>{t('saveQR')}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-          {/* ==== /QR AREA ==== */}
-        </View>
-      )}
+        )}
+      </ScrollView>
     </>
   );
 }
+
 
 
  const handleOpenPortModal = useCallback((port) => {
@@ -724,60 +735,159 @@ function ModalContent({
     try { await Linking.openURL(url); } catch { toast(t('toastOpenLinkFail')); }
   }, [toast, t]);
 
-  const saveQrPng = useCallback(async () => {
-    if (!modalPort) {
-      toast(t('toastNoPort'));
-      return;
+const saveQrPng = useCallback(async () => {
+  if (!modalPort) { toast(t('toastNoPort')); return; }
+
+  const fname = `qr_${selectedDevice?.code || 'device'}_port${modalPort.portNumber}_${Date.now()}.png`;
+
+  if (Platform.OS === 'web') {
+    try {
+      let svgEl = null;
+      
+      // Cách 1: Tìm tất cả SVG trong modal hiện tại
+      const modalSvgs = document.querySelectorAll('[class*="modal"] svg, [class*="Modal"] svg');
+      if (modalSvgs.length > 0) {
+        svgEl = modalSvgs[modalSvgs.length - 1]; // Lấy SVG cuối cùng (QR code)
+      }
+      
+      // Cách 2: Tìm SVG trong .qrBox hoặc .qrWrap
+      if (!svgEl) {
+        const qrSvgs = document.querySelectorAll('.qrBox svg, .qrWrap svg');
+        if (qrSvgs.length > 0) {
+          svgEl = qrSvgs[0];
+        }
+      }
+      
+      // Cách 3: Tìm bất kỳ SVG nào gần đây nhất được render
+      if (!svgEl) {
+        const allSvgs = Array.from(document.querySelectorAll('svg'));
+        // Lọc SVG có width/height hợp lý (loại bỏ icon nhỏ)
+        svgEl = allSvgs.find(svg => {
+          const width = svg.getAttribute('width') || svg.clientWidth;
+          const height = svg.getAttribute('height') || svg.clientHeight;
+          return Number(width) >= 150 && Number(height) >= 150; // QR code thường >= 200x200
+        });
+      }
+
+      if (!svgEl) { 
+        console.error('Cannot find SVG element. Available SVGs:', document.querySelectorAll('svg').length);
+        console.error('Modal elements:', document.querySelectorAll('[class*="modal"]').length);
+        toast(t('toastQrNotReady')); 
+        return; 
+      }
+
+      console.log('Found SVG:', svgEl, 'Size:', svgEl.clientWidth, 'x', svgEl.clientHeight);
+
+      // Clone SVG để tránh ảnh hưởng đến bản gốc
+      const clonedSvg = svgEl.cloneNode(true);
+      
+      // Đảm bảo SVG có kích thước rõ ràng
+      const width = clonedSvg.getAttribute('width') || clonedSvg.clientWidth || 200;
+      const height = clonedSvg.getAttribute('height') || clonedSvg.clientHeight || 200;
+      clonedSvg.setAttribute('width', width);
+      clonedSvg.setAttribute('height', height);
+
+      const svgData = new XMLSerializer().serializeToString(clonedSvg);
+      
+      // ⚠️ FIX: Dùng window.Image thay vì Image từ React Native
+      const img = new window.Image();
+      
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const scale = 2; // Tăng chất lượng ảnh
+          canvas.width = Number(width) * scale;
+          canvas.height = Number(height) * scale;
+          
+          const ctx = canvas.getContext('2d');
+          // Thêm nền trắng
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          
+          const pngUrl = canvas.toDataURL('image/png');
+
+          // Download ảnh
+          const a = document.createElement('a');
+          a.href = pngUrl;
+          a.download = fname;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          
+          console.log('QR Code saved successfully:', fname);
+          toast(t('toastSaved'));
+        } catch (canvasError) {
+          console.error('Canvas error:', canvasError);
+          toast(t('toastQrNotReady'));
+        }
+      };
+      
+      img.onerror = (err) => {
+        console.error('Image load error:', err);
+        toast(t('toastQrNotReady'));
+      };
+      
+      // Thêm namespace XML nếu thiếu
+      const svgWithNs = svgData.includes('xmlns') 
+        ? svgData 
+        : svgData.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+      
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgWithNs);
+    } catch (e) {
+      console.error('saveQrPng error:', e);
+      toast('' + (e?.message || e));
+    }
+    return;
+  }
+
+  // ===== Native (Android/iOS) =====
+  try {
+    if (!qrRef.current) { 
+      toast(t('toastQrNotReady')); 
+      return; 
     }
 
-    try {
-      // iOS permission placeholder
-      if (Platform.OS === 'ios') {
-        const permission = await PermissionsAndroid.request('ios.permission.PHOTO_LIBRARY_ADD_ONLY');
-        if (permission === 'denied') {
-          toast(t('toastNeedPhoto'));
-          return;
-        }
+    // Xin quyền cho iOS
+    if (Platform.OS === 'ios') {
+      const permission = await PermissionsAndroid.request('ios.permission.PHOTO_LIBRARY_ADD_ONLY');
+      if (permission === 'denied') { 
+        toast(t('toastNeedPhoto')); 
+        return; 
       }
-
-      // Android < 29 cần WRITE_EXTERNAL_STORAGE
-      if (Platform.OS === 'android' && Platform.Version < 29) {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-        );
-        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-          toast(t('toastNeedStorage'));
-          return;
-        }
-      }
-
-      if (!qrRef.current) {
-        toast(t('toastQrNotReady'));
+    }
+    
+    // Xin quyền cho Android < 10
+    if (Platform.OS === 'android' && Platform.Version < 29) {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+      );
+      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+        toast(t('toastNeedStorage')); 
         return;
       }
-
-      qrRef.current.toDataURL(async (base64Data) => {
-        try {
-          const fname = `qr_${selectedDevice?.code || 'device'}_port${modalPort.portNumber}_${Date.now()}.png`;
-
-          const tempPath = `${RNFS.CachesDirectoryPath}/${fname}`;
-          await RNFS.writeFile(tempPath, base64Data, 'base64');
-
-          await CameraRoll.save(tempPath, { type: 'photo' });
-
-          await RNFS.unlink(tempPath).catch(() => {});
-
-          toast(t('toastSaved'));
-        } catch (writeError) {
-          console.error('Save error:', writeError);
-          toast('' + (writeError?.message || writeError));
-        }
-      });
-    } catch (error) {
-      console.error('saveQrPng error:', error);
-      toast('' + (error?.message || error));
     }
-  }, [modalPort, selectedDevice, toast, t]);
+
+    // Xuất QR thành base64 và lưu
+    qrRef.current.toDataURL(async (base64Data) => {
+      try {
+        const tempPath = `${RNFS.CachesDirectoryPath}/${fname}`;
+        await RNFS.writeFile(tempPath, base64Data, 'base64');
+        await CameraRoll.save(tempPath, { type: 'photo' });
+        await RNFS.unlink(tempPath).catch(() => {});
+        toast(t('toastSaved'));
+      } catch (writeError) {
+        console.error('Save error:', writeError);
+        toast('' + (writeError?.message || writeError));
+      }
+    });
+  } catch (error) {
+    console.error('saveQrPng native error:', error);
+    toast('' + (error?.message || error));
+  }
+}, [modalPort, selectedDevice, toast, t]);
+
+
   
 
   /* ===== UI ===== */
@@ -851,7 +961,7 @@ const renderItem = useCallback(({ item }) => {
   return (
     <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header} onLayout={(e)=>setHeaderHeight(e.nativeEvent.layout.height)}>
+      <View style={styles.header} onLayout={(e)=> setHeaderHeight(e?.nativeEvent?.layout?.height || HEADER_DEFAULT_H)}>
         <TouchableOpacity style={styles.menuButton} onPress={openDrawer}>
           <Icon name="menu" size={24} color="white" />
         </TouchableOpacity>
@@ -859,8 +969,8 @@ const renderItem = useCallback(({ item }) => {
       </View>
 
       {/* Drawer */}
-      <View>
-        <EdgeDrawer visible={drawerOpen} onClose={closeDrawer}>
+      <View style={{zIndex:1000}}>
+        <EdgeDrawer visible={drawerOpen} onClose={closeDrawer} topOffset={0}>
           <View style={styles.drawerHeader}>
             <View className="drawerBadge" style={styles.drawerBadge}><Icon name="ev-station" size={16} color="#fff" /></View>
             <Text style={styles.drawerTitle}>{t('devices')}</Text>
@@ -875,7 +985,7 @@ const renderItem = useCallback(({ item }) => {
                 style={[styles.deviceMenuItem, selectedId === item.id && { borderColor: '#111827', backgroundColor: '#f7faff' }]}
               >
                 <View style={styles.deviceMenuIcon}><Icon name="memory" size={16} color="#fff" /></View>
-                <View style={{ flex: 1 }}>
+                <View  >
                   <Text style={styles.deviceMenuName} numberOfLines={1}>{item.name}</Text>
                   <Text style={styles.deviceMenuPorts}>{t('ports', item.portsCount)}</Text>
                 </View>
@@ -963,14 +1073,18 @@ const renderItem = useCallback(({ item }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F6F7FB' },
 
-  header: {
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    paddingTop: 25,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+ header: {
+  backgroundColor: '#4A90E2',
+  paddingHorizontal: 20,
+  paddingVertical: 15,
+  paddingTop: 25,
+  flexDirection: 'row',
+  alignItems: 'center',
+  position: Platform.OS === 'web' ? 'fixed' : 'absolute',  // web dùng fixed, native absolute
+  top: 0, left: 0, right: 0,
+  zIndex: 1000,
+},
+
   menuButton: { padding: 4, marginRight: 8 },
   headerTitle: { color: 'white', fontSize: 18, fontWeight: '600', flex: 1 },
 
@@ -1055,6 +1169,7 @@ const styles = StyleSheet.create({
     zIndex: 2147483647, // max để khỏi bị layer khác đè
     justifyContent: 'center',
     alignItems: 'center',
+   
   },
 
   modalContainer: {
@@ -1062,12 +1177,20 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     width: '100%',
     maxWidth: 450,
-    maxHeight: '85%',
+    maxHeight: '85%',   // container giới hạn chiều cao
+    overflow: 'hidden', // để ScrollView không tràn
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.25,
     shadowRadius: 20,
     elevation: 10,
+  },
+
+    modalScroll: {
+    flexGrow: 0,          // đừng giãn vô hạn
+  },
+  modalScrollContent: {
+    paddingBottom: 20,    // chừa đáy để kéo hết
   },
   modalHeader: {
     flexDirection: 'row',
