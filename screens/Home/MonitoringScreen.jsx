@@ -152,8 +152,8 @@ function formatEnergyKWh(n) {
 const K_MONI_DEVICES_MENU = 'moni_devices_menu';
 const K_MONI_SELECTED_ID  = 'moni_selected_id';
 const K_MONI_DEVICE_MAP   = 'moni_device_map';
+const K_MONI_SCOPE        = 'moni_scope';          // ⬅️ NEW
 const SWR_MAX_AGE_MS = 60 * 1000;
-
 /* ====== LIVE overlay config ====== */
 const LIVE_TTL_MS = 10 * 1000;        // TTL overlay
 const ZERO_TO_READY_SEC = 0;          // nếu backend không bắn pt=3, set >0 để auto ready khi kw=0 liên tục Xs
@@ -170,7 +170,18 @@ function mapPortStatusToVisual(s) {
   return undefined;
 }
 
+async function purgeMonitoringCache() {
+  try {
+    await AsyncStorage.multiRemove([K_MONI_DEVICES_MENU, K_MONI_SELECTED_ID, K_MONI_DEVICE_MAP]);
+  } catch {}
+}
 
+// ⬇ NEW: scope theo token (không lưu full token)
+async function computeScope() {
+  const token = await getAccessTokenSafe();
+  if (!token) return 'anon';
+  return 't:' + token.slice(-12);
+}
 
 
 /* ====== ADAPTER (web rule) ====== */
@@ -312,26 +323,38 @@ export default function MonitoringScreen() {
   const qrRef = useRef(null);
 
   /* ====== SWR: hydrate cache ====== */
-  useEffect(() => {
-    (async () => {
-      try {
-        const entries = await AsyncStorage.multiGet([K_MONI_DEVICES_MENU, K_MONI_SELECTED_ID, K_MONI_DEVICE_MAP]);
-        const [menuStr, sid, mapStr] = entries.map(([, v]) => v);
-        if (menuStr) { try { setDevicesMenu(JSON.parse(menuStr)); } catch {} }
-        if (sid) setSelectedId(sid);
-        if (sid && mapStr) {
-          try {
-            const map = JSON.parse(mapStr) || {};
-            const cached = map[sid];
-            if (cached?.ui) {
-              baseDeviceRef.current = cached.ui;
-              setSelectedDevice(applyLiveToUI(cached.ui));
-            }
-          } catch {}
-        }
-      } catch {}
-    })();
-  }, []);
+ /* ====== SWR: hydrate cache ====== */
+useEffect(() => {
+  (async () => {
+    try {
+      // ⬇ NEW: scope-busting theo token
+      const scope = await computeScope();
+      const curScope = await AsyncStorage.getItem(K_MONI_SCOPE);
+      if (curScope !== scope) {
+        await purgeMonitoringCache();
+        await AsyncStorage.setItem(K_MONI_SCOPE, scope);
+      }
+
+      // hydrate cache cũ nếu còn
+      const entries = await AsyncStorage.multiGet([K_MONI_DEVICES_MENU, K_MONI_SELECTED_ID, K_MONI_DEVICE_MAP]);
+      const [menuStr, sid, mapStr] = entries.map(([, v]) => v);
+      if (menuStr) { try { setDevicesMenu(JSON.parse(menuStr)); } catch {} }
+      if (sid) setSelectedId(sid);
+
+      if (sid && mapStr) {
+        try {
+          const map = JSON.parse(mapStr) || {};
+          const cached = map[sid];
+          if (cached?.ui) {
+            baseDeviceRef.current = cached.ui;
+            setSelectedDevice(applyLiveToUI(cached.ui));
+          }
+        } catch {}
+      }
+    } catch {}
+  })();
+}, []);
+
 
   const saveMenuToCache = useCallback(async (menu) => {
     try { await AsyncStorage.setItem(K_MONI_DEVICES_MENU, JSON.stringify(menu)); } catch {}

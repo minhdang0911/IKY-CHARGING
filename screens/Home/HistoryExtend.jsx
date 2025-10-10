@@ -334,16 +334,16 @@ export default function HistoryExtend({ navigateToScreen }) {
       const token = await getAccessTokenSafe();
       if (!token) throw new Error('No token');
 
-      const first = await getOrders(token, { page: 1, limit: 100 });
+      const first = await getOrders(token, { page: 1, limit: 1000 });
       let list = Array.isArray(first?.data) ? first.data : (Array.isArray(first) ? first : []);
-      const lim = Number(first?.limit ?? first?.per_page ?? 100) || 100;
+      const lim = Number(first?.limit ?? first?.per_page ?? 1000) || 1000;
       const totalItems = Number(first?.total ?? 0);
       let totalPages = first?.totalPages ?? first?.total_pages ?? (totalItems ? Math.ceil(totalItems/lim) : 1);
       if (!totalPages || Number.isNaN(totalPages)) totalPages = 1;
 
       for (let p = 2; p <= totalPages; p += 1) {
         // eslint-disable-next-line no-await-in-loop
-        const chunk = await getOrders(token, { page: p, limit: 100 });
+        const chunk = await getOrders(token, { page: p, limit: 1000 });
         const arr = Array.isArray(chunk?.data) ? chunk.data : (Array.isArray(chunk) ? chunk : []);
         list = list.concat(arr);
       }
