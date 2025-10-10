@@ -3,7 +3,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Pressable, ScrollView,
   FlatList, Platform, ToastAndroid, Alert, Image, Modal,
-   PermissionsAndroid, Linking
+  PermissionsAndroid, Linking
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -65,6 +65,10 @@ const STRINGS = {
     errLoadDeviceInfo: 'Load device info lỗi',
     missingToken: 'Thiếu accessToken',
     viewDetail: 'Xem chi tiết',
+    // ⬇ empty
+    noDevicesTitle: 'Không có thiết bị nào',
+    noDevicesDesc: 'Tài khoản này chưa có thiết bị hoặc chưa được phân quyền.',
+    tryAgain: 'Thử lại',
   },
   en: {
     headerTitle: (name) => `Monitoring device: ${name || '—'}`,
@@ -100,7 +104,11 @@ const STRINGS = {
     errLoadDevices: 'Failed to load devices',
     errLoadDeviceInfo: 'Failed to load device info',
     missingToken: 'Missing accessToken',
-     viewDetail: 'View details',
+    viewDetail: 'View details',
+    // ⬇ empty
+    noDevicesTitle: 'No devices',
+    noDevicesDesc: 'This account has no devices or lacks permissions.',
+    tryAgain: 'Try again',
   },
 };
 const useI18n = () => {
@@ -112,9 +120,6 @@ const useI18n = () => {
   };
   return { t, lang };
 };
-
-
-
 
 /* ========== helpers ========== */
 const STATUS_COLOR = { ready: '#16a34a', charging: '#2563eb', offline: '#ef4444', fault: '#f59e0b' };
@@ -154,27 +159,34 @@ function formatEnergyKWh(n) {
   return a < 1 ? `${Math.round(v * 1000)} Wh` : `${trim0(v, 2)} kWh`;
 }
 
-
 function slugify(s) {
   return String(s || '')
-   .normalize('NFD')
-   .replace(/[\u0300-\u036f]/g, '')
-   .trim()
-   .replace(/\s+/g, '-')                  
-   .replace(/-+/g, '-')                    
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
 }
 
 /* ====== Cache keys (SWR) ====== */
 const K_MONI_DEVICES_MENU = 'moni_devices_menu';
 const K_MONI_SELECTED_ID  = 'moni_selected_id';
 const K_MONI_DEVICE_MAP   = 'moni_device_map';
+const K_MONI_SCOPE        = 'moni_scope';
 const SWR_MAX_AGE_MS = 60 * 1000;
 
-/* ====== LIVE overlay config ====== */
-const LIVE_TTL_MS = 10 * 1000;        // TTL overlay
-const ZERO_TO_READY_SEC = 0;          // nếu backend không bắn pt=3, set >0 để auto ready khi kw=0 liên tục Xs
+// purge toàn bộ cache monitor
+async function purgeMonitoringCache() {
+  try {
+    await AsyncStorage.multiRemove([K_MONI_DEVICES_MENU, K_MONI_SELECTED_ID, K_MONI_DEVICE_MAP]);
+  } catch {}
+}
 
-// Map<device_code, { status?:'online'|'offline', ts:number, ports: Map<number, {portStatus?:string, powerKW?:number, energyKWh?:number, end?:string, zeroSince?:number, ts:number}> }>
+/* ====== LIVE overlay config ====== */
+const LIVE_TTL_MS = 10 * 1000;
+const ZERO_TO_READY_SEC = 0;
+
+// Map<device_code, {...}>
 const liveRef = { current: new Map() };
 
 function mapPortStatusToVisual(s) {
@@ -186,17 +198,19 @@ function mapPortStatusToVisual(s) {
   return undefined;
 }
 
-
-
+// scope theo token (không lưu full token)
+async function computeScope() {
+  const token = await getAccessTokenSafe();
+  if (!token) return 'anon';
+  return 't:' + token.slice(-12);
+}
 
 /* ====== ADAPTER (web rule) ====== */
 function adaptDeviceInfoToUI(info, sessionsDev, lang) {
-   
   const name = info?.name || info?.device_code || '—';
-   const agentName = (typeof info?.agent_id === 'object' ? info?.agent_id?.name : '') || '';
+  const agentName = (typeof info?.agent_id === 'object' ? info?.agent_id?.name : '') || '';
   const ports = Array.isArray(info?.ports) ? info.ports : [];
   const deviceOffline = isDeviceOffline(info);
- 
 
   const sessionByPort = {};
   if (sessionsDev && Array.isArray(sessionsDev.ports)) {
@@ -204,35 +218,31 @@ function adaptDeviceInfoToUI(info, sessionsDev, lang) {
       if (p?.portNumber != null) sessionByPort[p.portNumber] = p.latestSession || null;
     }
   }
-  console.log('[DEBUG] sessionByPort:', sessionByPort);
-
 
   const uiPorts = ports.map((p) => {
     const sess = sessionByPort[p?.portNumber] || p?.latestSession || null;
 
-   const portStat = normalize(p?.status);
-const sessStat = normalize(sess?.status);
+    const portStat = normalize(p?.status);
+    const sessStat = normalize(sess?.status);
 
-let visual = 'ready';
-let textStat = 'ready';
+    let visual = 'ready';
+    let textStat = 'ready';
 
-if (deviceOffline) {
-  visual = 'offline'; textStat = 'offline';
-} else if (['busy','charging'].includes(portStat)) {
-  visual = 'charging'; textStat = 'charging';
-} else if (['idle','ready'].includes(portStat)) {
-  visual = 'ready'; textStat = 'ready';
-} else if (!portStat) {
-  // Fallback khi thiếu status ở detail → dùng session
-  if (['running','in_progress','active','charging'].includes(sessStat)) {
-    visual = 'charging'; textStat = 'charging';
-  } else if (['completed','finish','finished','stopped','pending'].includes(sessStat)) {
-    visual = 'ready'; textStat = 'ready';
-  }
-} else if (['fault','error','unavailable'].includes(portStat)) {
-  visual = 'fault'; textStat = 'fault';
-}
-
+    if (deviceOffline) {
+      visual = 'offline'; textStat = 'offline';
+    } else if (['busy','charging'].includes(portStat)) {
+      visual = 'charging'; textStat = 'charging';
+    } else if (['idle','ready'].includes(portStat)) {
+      visual = 'ready'; textStat = 'ready';
+    } else if (!portStat) {
+      if (['running','in_progress','active','charging'].includes(sessStat)) {
+        visual = 'charging'; textStat = 'charging';
+      } else if (['completed','finish','finished','stopped','pending'].includes(sessStat)) {
+        visual = 'ready'; textStat = 'ready';
+      }
+    } else if (['fault','error','unavailable'].includes(portStat)) {
+      visual = 'fault'; textStat = 'fault';
+    }
 
     return {
       id: p?._id ?? `${p?.portNumber ?? 'x'}`,
@@ -244,7 +254,6 @@ if (deviceOffline) {
       end: formatDateTime(sess?.endTime, lang),
       kw: p?.kw ?? 0,
       kwh: sess?.energy_used_kwh ?? 0,
-      
     };
   });
 
@@ -260,9 +269,6 @@ if (deviceOffline) {
     rawStatus: info?.status,
   };
 }
-
-
-
 
 /* ========= APPLY LIVE OVERLAY ========= */
 function applyLiveToUI(ui) {
@@ -292,9 +298,9 @@ function applyLiveToUI(ui) {
       ...p,
       visualStatus: visual,
       portTextStatus: text,
-      kw:    fresh && typeof liveP.powerKW === 'number'   ? liveP.powerKW   : p.kw,
-      kwh:   fresh && typeof liveP.energyKWh === 'number' ? liveP.energyKWh : p.kwh,
-      end:   fresh && liveP.end ? liveP.end : p.end,
+      kw:  fresh && typeof liveP.powerKW === 'number'   ? liveP.powerKW   : p.kw,
+      kwh: fresh && typeof liveP.energyKWh === 'number' ? liveP.energyKWh : p.kwh,
+      end: fresh && liveP.end ? liveP.end : p.end,
     };
   });
 
@@ -308,7 +314,6 @@ export default function MonitoringScreen() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
- 
 
   const [devicesMenu, setDevicesMenu] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -319,7 +324,7 @@ export default function MonitoringScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const baseDeviceRef = useRef(null);
   const HEADER_DEFAULT_H = 64;
-const [headerHeight, setHeaderHeight] = useState(HEADER_DEFAULT_H);
+  const [headerHeight, setHeaderHeight] = useState(HEADER_DEFAULT_H);
 
   const toast = useCallback((msg) => {
     if (Platform.OS === 'android') ToastAndroid.show(msg, ToastAndroid.SHORT);
@@ -328,19 +333,28 @@ const [headerHeight, setHeaderHeight] = useState(HEADER_DEFAULT_H);
 
   const [showModal, setShowModal] = useState(false);
   const [modalPort, setModalPort] = useState(null);
-  const openPortModal = useCallback((p) => { setModalPort(p); setShowModal(true); }, []);
-  const closePortModal = useCallback(() => setShowModal(false), []);
 
   const qrRef = useRef(null);
 
-  /* ====== SWR: hydrate cache ====== */
+  /* ====== SWR: hydrate cache + scope-busting theo account ====== */
   useEffect(() => {
     (async () => {
       try {
+        // scope check
+        const scope = await computeScope();
+        const curScope = await AsyncStorage.getItem(K_MONI_SCOPE);
+        if (curScope !== scope) {
+          await purgeMonitoringCache();
+          await AsyncStorage.setItem(K_MONI_SCOPE, scope);
+        }
+
+        // hydrate cache
         const entries = await AsyncStorage.multiGet([K_MONI_DEVICES_MENU, K_MONI_SELECTED_ID, K_MONI_DEVICE_MAP]);
         const [menuStr, sid, mapStr] = entries.map(([, v]) => v);
+
         if (menuStr) { try { setDevicesMenu(JSON.parse(menuStr)); } catch {} }
         if (sid) setSelectedId(sid);
+
         if (sid && mapStr) {
           try {
             const map = JSON.parse(mapStr) || {};
@@ -385,6 +399,16 @@ const [headerHeight, setHeaderHeight] = useState(HEADER_DEFAULT_H);
       const token = await getAccessTokenSafe(); if (!token) throw new Error(t('missingToken'));
       const res = await getDevices(token);
       const arr = Array.isArray(res?.data) ? res.data : [];
+
+      // rỗng → clear hết & hiển thị empty state
+      if (arr.length === 0) {
+        await purgeMonitoringCache();
+        setDevicesMenu([]);
+        setSelectedId(null);
+        setSelectedDevice(null);
+        return;
+      }
+
       arr.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
       const menu = arr.map((item) => ({
         id: item?._id ?? item?.device_code,
@@ -395,9 +419,14 @@ const [headerHeight, setHeaderHeight] = useState(HEADER_DEFAULT_H);
       setDevicesMenu(menu);
       saveMenuToCache(menu);
 
-      if (!selectedId && menu.length > 0) {
-        setSelectedId(menu[0].id);
-        saveSelectedId(menu[0].id);
+      // id cũ không còn → chọn lại
+      const stillExists = selectedId && menu.some(m => m.id === selectedId);
+      if (!stillExists) {
+        const nextId = menu[0]?.id ?? null;
+        setSelectedId(nextId);
+        if (nextId) saveSelectedId(nextId); else await AsyncStorage.removeItem(K_MONI_SELECTED_ID);
+        baseDeviceRef.current = null;
+        setSelectedDevice(null);
       }
     } catch (e) {
       console.warn('loadDeviceList error', e); toast(e?.message || t('errLoadDevices'));
@@ -433,12 +462,16 @@ const [headerHeight, setHeaderHeight] = useState(HEADER_DEFAULT_H);
         try {
           if (!cached?.ui) setLoadingDetail(true);
           const uiBase = await fetchDeviceDetail(deviceId);
+          if (!uiBase || !uiBase.deviceId) throw new Error('Device not found');
+
           baseDeviceRef.current = uiBase;
           const uiApplied = applyLiveToUI(uiBase);
           setSelectedDevice(uiApplied);
           saveDeviceUiToCache(deviceId, uiBase);
         } catch (e) {
           console.warn('loadDeviceDetail(SWR) error', e);
+          baseDeviceRef.current = null;
+          setSelectedDevice(null);
           !cached?.ui && toast(e?.message || t('errLoadDeviceInfo'));
         } finally {
           setLoadingDetail(false);
@@ -448,12 +481,15 @@ const [headerHeight, setHeaderHeight] = useState(HEADER_DEFAULT_H);
       setLoadingDetail(true);
       try {
         const uiBase = await fetchDeviceDetail(deviceId);
+        if (!uiBase || !uiBase.deviceId) throw new Error('Device not found');
         baseDeviceRef.current = uiBase;
         const uiApplied = applyLiveToUI(uiBase);
         setSelectedDevice(uiApplied);
         saveDeviceUiToCache(deviceId, uiBase);
       } catch (e) {
         console.warn('loadDeviceDetail error', e);
+        baseDeviceRef.current = null;
+        setSelectedDevice(null);
         toast(e?.message || t('errLoadDeviceInfo'));
       } finally {
         setLoadingDetail(false);
@@ -461,129 +497,123 @@ const [headerHeight, setHeaderHeight] = useState(HEADER_DEFAULT_H);
     }
   }, [fetchDeviceDetail, getCachedDevice, saveDeviceUiToCache, toast, t]);
 
- 
-
   useEffect(() => { loadDeviceList({ silent: !!devicesMenu.length }); /* eslint-disable-line */ }, []);
-useEffect(() => {
- if (selectedId) {
-    saveSelectedId(selectedId);
-   loadDeviceDetail(selectedId, { swr: false }); // ép gọi API mới ngay sau F5
- }
-} ,[selectedId]);
-function WebModal({ visible, onRequestClose, children }) {
-  if (!visible) return null;
-  return (
-    <Pressable style={styles.modalOverlayAbs} onPress={onRequestClose}>
-      <View style={styles.modalContainer} onStartShouldSetResponder={() => true}>
-        {children}
-      </View>
-    </Pressable>
-  );
-}
+  useEffect(() => {
+    if (selectedId) {
+      saveSelectedId(selectedId);
+      loadDeviceDetail(selectedId, { swr: false }); // ép gọi API mới ngay sau F5
+    }
+  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-function ModalContent({
-  t, headerName, modalPort,
-  buildCheckoutUrl, openLink, saveQrPng, qrRef
-}) {
-  return (
-    <>
-      {/* Header cố định */}
-      <View style={styles.modalHeader}>
-        <View style={styles.modalHeaderLeft}>
-          <View style={styles.modalIconBadge}>
-            <Icon name="bolt" size={20} color="#fff" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.modalTitle}>{t('portDetail')}</Text>
-            {!!modalPort && (
-              <Text style={styles.modalSubtitle}>
-                {headerName} • {t('port')} {modalPort?.name} • {t(modalPort?.portTextStatus)}
-              </Text>
-            )}
+  function WebModal({ visible, onRequestClose, children }) {
+    if (!visible) return null;
+    return (
+      <Pressable style={styles.modalOverlayAbs} onPress={onRequestClose}>
+        <View style={styles.modalContainer} onStartShouldSetResponder={() => true}>
+          {children}
+        </View>
+      </Pressable>
+    );
+  }
+
+  function ModalContent({ t, headerName, modalPort, buildCheckoutUrl, openLink, saveQrPng, qrRef }) {
+    return (
+      <>
+        {/* Header cố định */}
+        <View style={styles.modalHeader}>
+          <View style={styles.modalHeaderLeft}>
+            <View style={styles.modalIconBadge}>
+              <Icon name="bolt" size={20} color="#fff" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.modalTitle}>{t('portDetail')}</Text>
+              {!!modalPort && (
+                <Text style={styles.modalSubtitle}>
+                  {headerName} • {t('port')} {modalPort?.name} • {t(modalPort?.portTextStatus)}
+                </Text>
+              )}
+            </View>
           </View>
         </View>
-      </View>
 
-      {/* Phần có thể kéo */}
-      <ScrollView
-        style={styles.modalScroll}
-        contentContainerStyle={styles.modalScrollContent}
-        keyboardShouldPersistTaps="handled"
-        nestedScrollEnabled
-        showsVerticalScrollIndicator
-        bounces={false}
-      >
-        {!!modalPort && (
-          <View style={styles.modalContent}>
-            <View style={styles.modalInfoCard}>
-              {[
-                ['Port', `${t('port')} ${modalPort.name}`],
-                [t('status'), t(modalPort.portTextStatus)],
-                [t('start'), modalPort.start],
-                [t('end'), modalPort.end],
-                [t('power'), formatPowerKW(modalPort.kw)],
-                [t('energy'), formatEnergyKWh(modalPort.kwh)],
-              ].map(([k, v], i) => (
-                <View key={k} style={[styles.modalInfoRow, i === 0 && { borderTopWidth: 0 }]}>
-                  <Text style={styles.modalInfoKey}>{k}</Text>
-                  <Text style={styles.modalInfoValue}>{v}</Text>
-                </View>
-              ))}
-            </View>
+        {/* Phần có thể kéo */}
+        <ScrollView
+          style={styles.modalScroll}
+  contentContainerStyle={styles.modalScrollContent}
+  keyboardShouldPersistTaps="handled"
+  nestedScrollEnabled
+  showsVerticalScrollIndicator
+  bounces={false}
+  maintainVisibleContentPosition={{ minIndexForVisible: 0 }} 
+  scrollEventThrottle={16} 
+  automaticallyAdjustContentInsets={false} 
+        >
+          {!!modalPort && (
+            <View style={styles.modalContent}>
+              <View style={styles.modalInfoCard}>
+                {[
+                  ['Port', `${t('port')} ${modalPort.name}`],
+                  [t('status'), t(modalPort.portTextStatus)],
+                  [t('start'), modalPort.start],
+                  [t('end'), modalPort.end],
+                  [t('power'), formatPowerKW(modalPort.kw)],
+                  [t('energy'), formatEnergyKWh(modalPort.kwh)],
+                ].map(([k, v], i) => (
+                  <View key={k} style={[styles.modalInfoRow, i === 0 && { borderTopWidth: 0 }]}>
+                    <Text style={styles.modalInfoKey}>{k}</Text>
+                    <Text style={styles.modalInfoValue}>{v}</Text>
+                  </View>
+                ))}
+              </View>
 
-            <Text style={styles.qrHint}>{t('tapQRHint')}</Text>
+              <Text style={styles.qrHint}>{t('tapQRHint')}</Text>
 
-            <View style={styles.qrWrap}>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
-              >
-                <View style={styles.qrBox}>
-                  <QRCode
-                    value={buildCheckoutUrl(modalPort.portNumber)}
-                    size={200}
-                    quietZone={10}
-                    getRef={(c) => { qrRef.current = c; }}
-                  />
-                </View>
-              </TouchableOpacity>
-
-              <View style={styles.modalActions}>
+              <View style={styles.qrWrap}>
                 <TouchableOpacity
-                  style={styles.btnPrimary}
+                  activeOpacity={0.9}
                   onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
                 >
-                  <Text style={styles.btnPrimaryText}>{t('openLink')}</Text>
+                  <View style={styles.qrBox}>
+                    <QRCode
+                      value={buildCheckoutUrl(modalPort.portNumber)}
+                      size={200}
+                      quietZone={10}
+                      getRef={(c) => { qrRef.current = c; }}
+                    />
+                  </View>
                 </TouchableOpacity>
 
-                <View style={{ width: 10 }} />
+                <View style={styles.modalActions}>
+                  <TouchableOpacity
+                    style={styles.btnPrimary}
+                    onPress={() => openLink(buildCheckoutUrl(modalPort.portNumber))}
+                  >
+                    <Text style={styles.btnPrimaryText}>{t('openLink')}</Text>
+                  </TouchableOpacity>
 
-                <TouchableOpacity style={styles.btnGhost} onPress={saveQrPng}>
-                  <Text style={styles.btnGhostText}>{t('saveQR')}</Text>
-                </TouchableOpacity>
+                  <View style={{ width: 10 }} />
+
+                  <TouchableOpacity style={styles.btnGhost} onPress={saveQrPng}>
+                    <Text style={styles.btnGhostText}>{t('saveQR')}</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
-          </View>
-        )}
-      </ScrollView>
-    </>
-  );
-}
+          )}
+        </ScrollView>
+      </>
+    );
+  }
 
-
-
- const handleOpenPortModal = useCallback((port) => {
-    console.log('[Monitoring] OPEN DETAIL:', port?.id, port);
+  const handleOpenPortModal = useCallback((port) => {
     setModalPort(port || null);
     setShowModal(Boolean(port));
   }, []);
   const handleClosePortModal = useCallback(() => {
-    console.log('[Monitoring] CLOSE DETAIL');
     setShowModal(false);
   }, []);
 
-
- const ModalLike = Platform.OS === 'web' ? WebModal : Modal;
+  const ModalLike = Platform.OS === 'web' ? WebModal : Modal;
   const modalProps = Platform.OS === 'web'
     ? { visible: showModal, onRequestClose: handleClosePortModal }
     : { visible: showModal, transparent: true, animationType: 'fade', onRequestClose: handleClosePortModal };
@@ -628,7 +658,6 @@ function ModalContent({
       const dev = liveRef.current.get(code) || { ports: new Map(), ts: now };
 
       if (pt === 1) {
-        // power/energy (tổng hoặc theo port)
         const arr = Array.isArray(obj?.kw) ? obj.kw : null;
         const powerKW   = Number(arr?.[0]) || 0;
         const energyKWh = Number(arr?.[1]) || 0;
@@ -640,32 +669,27 @@ function ModalContent({
             ...cur,
             powerKW,
             energyKWh,
-            // nếu power về 0 thì đánh dấu thời điểm về 0 (để optional auto-ready)
             zeroSince: (powerKW === 0 ? (cur.zeroSince || now) : undefined),
             ts: now,
           });
-        } else {
-          // không có portNumber -> bỏ qua hoặc tùy logic của m (ở đây bỏ qua để tránh ghi đè sai cổng)
         }
         dev.ts = now;
         liveRef.current.set(code, dev);
 
       } else if (pt === 2) {
-        // online/offline device
         const st = normalize(obj?.status);
         dev.status = (st === 'offline') ? 'offline' : 'online';
         dev.ts = now;
         liveRef.current.set(code, dev);
 
       } else if (pt === 3) {
-        // completed / status cổng
         const pn = toInt(obj?.portNumber);
         if (Number.isFinite(pn)) {
           const cur = dev.ports.get(pn) || {};
           const mapped = mapPortStatusToVisual(obj?.portStatus) || 'ready';
           dev.ports.set(pn, {
             ...cur,
-            portStatus: mapped,                  // flip về ready ngay
+            portStatus: mapped,
             energyKWh: Number(obj?.kwh) || cur.energyKWh,
             end: obj?.endTime || cur.end,
             powerKW: 0,
@@ -679,7 +703,6 @@ function ModalContent({
         return;
       }
 
-      // Re-render nếu đang xem đúng device
       const showing = getSelectedDeviceCode();
       if (showing && showing === code && baseDeviceRef.current) {
         setSelectedDevice(applyLiveToUI(baseDeviceRef.current));
@@ -689,7 +712,7 @@ function ModalContent({
     return () => { try { off?.(); } catch {} };
   }, [getSelectedDeviceCode]);
 
-  // Tick mỗi 1s để TTL tự rơi overlay, và (tuỳ chọn) auto-ready khi kw=0 đủ lâu
+  // Tick mỗi 1s để TTL tự rơi overlay
   useEffect(() => {
     const id = setInterval(() => {
       const base = baseDeviceRef.current;
@@ -701,12 +724,7 @@ function ModalContent({
         if (dev?.ports) {
           for (const [pn, cur] of dev.ports.entries()) {
             if (cur?.powerKW === 0 && cur?.zeroSince && (now - cur.zeroSince >= ZERO_TO_READY_SEC * 1000)) {
-              // nếu backend không gửi pt=3 thì ép về ready
-              dev.ports.set(pn, {
-                ...cur,
-                portStatus: 'ready',
-                ts: now,
-              });
+              dev.ports.set(pn, { ...cur, portStatus: 'ready', ts: now });
             }
           }
         }
@@ -717,7 +735,7 @@ function ModalContent({
     return () => clearInterval(id);
   }, []);
 
-  /* ===== Skeleton / header ===== */
+  /* ===== Skeleton / header & empty-state ===== */
   const expectedPorts = (() => {
     if (selectedDevice?.ports?.length) return selectedDevice.ports.length;
     const m = devicesMenu.find(d => d.id === selectedId);
@@ -727,8 +745,14 @@ function ModalContent({
   const isLoadingPorts = !selectedDevice || loadingDetail || !(selectedDevice?.ports?.length > 0);
 
   const menuSelected = devicesMenu.find(d => d.id === selectedId);
-  const headerName = selectedDevice?.name || menuSelected?.name || t('loading');
+
+  const showEmpty = !loadingList && devicesMenu.length === 0; // ⬅️ empty khi list rỗng
+
+  const headerName =
+    showEmpty ? t('noDevicesTitle') : (selectedDevice?.name || menuSelected?.name || t('loading'));
+
   const headerPortsText = (() => {
+    if (showEmpty) return t('ports', 0);
     if (isLoadingPorts) {
       return menuSelected?.portsCount != null
         ? t('ports', menuSelected.portsCount)
@@ -749,227 +773,156 @@ function ModalContent({
     try { await Linking.openURL(url); } catch { toast(t('toastOpenLinkFail')); }
   }, [toast, t]);
 
+  const saveQrPng = useCallback(async () => {
+    if (!modalPort) { toast(t('toastNoPort')); return; }
 
-  console.log('selectedDevice:', selectedDevice);
-const saveQrPng = useCallback(async () => {
-  if (!modalPort) { toast(t('toastNoPort')); return; }
+    const device = selectedDevice?.name || selectedDevice?.code || 'Device';
+    const port = modalPort.portNumber != null ? `cổng ${modalPort.portNumber}` : 'c?';
+    const baseLabel = `${device}-${port}`;
+    const fname = `${slugify(baseLabel)}.png`;
 
- const agent = selectedDevice?.agentName || 'Agent';
- const device = selectedDevice?.name || selectedDevice?.code || 'Device';
- const port = modalPort.portNumber != null ? `cổng ${modalPort.portNumber}` : 'c?';
- const baseLabel = `${device}-${port}`;
- const fname = `${slugify(baseLabel)}.png`;
-
-  if (Platform.OS === 'web') {
-    try {
-      let svgEl = null;
-      
-      // Cách 1: Tìm tất cả SVG trong modal hiện tại
-      const modalSvgs = document.querySelectorAll('[class*="modal"] svg, [class*="Modal"] svg');
-      if (modalSvgs.length > 0) {
-        svgEl = modalSvgs[modalSvgs.length - 1]; // Lấy SVG cuối cùng (QR code)
-      }
-      
-      // Cách 2: Tìm SVG trong .qrBox hoặc .qrWrap
-      if (!svgEl) {
-        const qrSvgs = document.querySelectorAll('.qrBox svg, .qrWrap svg');
-        if (qrSvgs.length > 0) {
-          svgEl = qrSvgs[0];
-        }
-      }
-      
-      // Cách 3: Tìm bất kỳ SVG nào gần đây nhất được render
-      if (!svgEl) {
-        const allSvgs = Array.from(document.querySelectorAll('svg'));
-        // Lọc SVG có width/height hợp lý (loại bỏ icon nhỏ)
-        svgEl = allSvgs.find(svg => {
-          const width = svg.getAttribute('width') || svg.clientWidth;
-          const height = svg.getAttribute('height') || svg.clientHeight;
-          return Number(width) >= 150 && Number(height) >= 150; // QR code thường >= 200x200
-        });
-      }
-
-      if (!svgEl) { 
-        console.error('Cannot find SVG element. Available SVGs:', document.querySelectorAll('svg').length);
-        console.error('Modal elements:', document.querySelectorAll('[class*="modal"]').length);
-        toast(t('toastQrNotReady')); 
-        return; 
-      }
-
-      console.log('Found SVG:', svgEl, 'Size:', svgEl.clientWidth, 'x', svgEl.clientHeight);
-
-      // Clone SVG để tránh ảnh hưởng đến bản gốc
-      const clonedSvg = svgEl.cloneNode(true);
-      
-      // Đảm bảo SVG có kích thước rõ ràng
-      const width = clonedSvg.getAttribute('width') || clonedSvg.clientWidth || 200;
-      const height = clonedSvg.getAttribute('height') || clonedSvg.clientHeight || 200;
-      clonedSvg.setAttribute('width', width);
-      clonedSvg.setAttribute('height', height);
-
-      const svgData = new XMLSerializer().serializeToString(clonedSvg);
-      
-      // ⚠️ FIX: Dùng window.Image thay vì Image từ React Native
-      const img = new window.Image();
-      
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          const scale = 2; // Tăng chất lượng ảnh
-          canvas.width = Number(width) * scale;
-          canvas.height = Number(height) * scale;
-          
-          const ctx = canvas.getContext('2d');
-          // Thêm nền trắng
-          ctx.fillStyle = '#FFFFFF';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          
-          const pngUrl = canvas.toDataURL('image/png');
-
-          // Download ảnh
-          const a = document.createElement('a');
-          a.href = pngUrl;
-          a.download = fname;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          
-          console.log('QR Code saved successfully:', fname);
-          toast(t('toastSaved'));
-        } catch (canvasError) {
-          console.error('Canvas error:', canvasError);
-          toast(t('toastQrNotReady'));
-        }
-      };
-      
-      img.onerror = (err) => {
-        console.error('Image load error:', err);
-        toast(t('toastQrNotReady'));
-      };
-      
-      // Thêm namespace XML nếu thiếu
-      const svgWithNs = svgData.includes('xmlns') 
-        ? svgData 
-        : svgData.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-      
-      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgWithNs);
-    } catch (e) {
-      console.error('saveQrPng error:', e);
-      toast('' + (e?.message || e));
-    }
-    return;
-  }
-
-  // ===== Native (Android/iOS) =====
-  try {
-    if (!qrRef.current) { 
-      toast(t('toastQrNotReady')); 
-      return; 
-    }
-
-    // Xin quyền cho iOS
-    if (Platform.OS === 'ios') {
-      const permission = await PermissionsAndroid.request('ios.permission.PHOTO_LIBRARY_ADD_ONLY');
-      if (permission === 'denied') { 
-        toast(t('toastNeedPhoto')); 
-        return; 
-      }
-    }
-    
-    // Xin quyền cho Android < 10
-    if (Platform.OS === 'android' && Platform.Version < 29) {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-      );
-      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-        toast(t('toastNeedStorage')); 
-        return;
-      }
-    }
-
-    // Xuất QR thành base64 và lưu
-    qrRef.current.toDataURL(async (base64Data) => {
+    if (Platform.OS === 'web') {
       try {
-        const tempPath = `${RNFS.CachesDirectoryPath}/${fname}`;
-        await RNFS.writeFile(tempPath, base64Data, 'base64');
-        await CameraRoll.save(tempPath, { type: 'photo' });
-        await RNFS.unlink(tempPath).catch(() => {});
-        toast(t('toastSaved'));
-      } catch (writeError) {
-        console.error('Save error:', writeError);
-        toast('' + (writeError?.message || writeError));
+        let svgEl = null;
+        const modalSvgs = document.querySelectorAll('[class*="modal"] svg, [class*="Modal"] svg');
+        if (modalSvgs.length > 0) svgEl = modalSvgs[modalSvgs.length - 1];
+        if (!svgEl) {
+          const qrSvgs = document.querySelectorAll('.qrBox svg, .qrWrap svg');
+          if (qrSvgs.length > 0) svgEl = qrSvgs[0];
+        }
+        if (!svgEl) {
+          const allSvgs = Array.from(document.querySelectorAll('svg'));
+          svgEl = allSvgs.find(svg => {
+            const w = svg.getAttribute('width') || svg.clientWidth;
+            const h = svg.getAttribute('height') || svg.clientHeight;
+            return Number(w) >= 150 && Number(h) >= 150;
+          });
+        }
+        if (!svgEl) { toast(t('toastQrNotReady')); return; }
+
+        const clonedSvg = svgEl.cloneNode(true);
+        const width = clonedSvg.getAttribute('width') || clonedSvg.clientWidth || 200;
+        const height = clonedSvg.getAttribute('height') || clonedSvg.clientHeight || 200;
+        clonedSvg.setAttribute('width', width);
+        clonedSvg.setAttribute('height', height);
+        const svgData = new XMLSerializer().serializeToString(clonedSvg);
+
+        const img = new window.Image();
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            const scale = 2;
+            canvas.width = Number(width) * scale;
+            canvas.height = Number(height) * scale;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const pngUrl = canvas.toDataURL('image/png');
+            const a = document.createElement('a');
+            a.href = pngUrl;
+            a.download = fname;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            toast(t('toastSaved'));
+          } catch {
+            toast(t('toastQrNotReady'));
+          }
+        };
+        img.onerror = () => toast(t('toastQrNotReady'));
+        const svgWithNs = svgData.includes('xmlns')
+          ? svgData
+          : svgData.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgWithNs);
+      } catch (e) {
+        toast('' + (e?.message || e));
       }
-    });
-  } catch (error) {
-    console.error('saveQrPng native error:', error);
-    toast('' + (error?.message || error));
-  }
-}, [modalPort, selectedDevice, toast, t]);
+      return;
+    }
 
-
-  
+    // Native
+    try {
+      if (!qrRef.current) { toast(t('toastQrNotReady')); return; }
+      if (Platform.OS === 'ios') {
+        const permission = await PermissionsAndroid.request('ios.permission.PHOTO_LIBRARY_ADD_ONLY');
+        if (permission === 'denied') { toast(t('toastNeedPhoto')); return; }
+      }
+      if (Platform.OS === 'android' && Platform.Version < 29) {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          toast(t('toastNeedStorage')); return;
+        }
+      }
+      qrRef.current.toDataURL(async (base64Data) => {
+        try {
+          const tempPath = `${RNFS.CachesDirectoryPath}/${fname}`;
+          await RNFS.writeFile(tempPath, base64Data, 'base64');
+          await CameraRoll.save(tempPath, { type: 'photo' });
+          await RNFS.unlink(tempPath).catch(() => {});
+          toast(t('toastSaved'));
+        } catch (writeError) {
+          toast('' + (writeError?.message || writeError));
+        }
+      });
+    } catch (error) {
+      toast('' + (error?.message || error));
+    }
+  }, [modalPort, selectedDevice, toast, t]);
 
   /* ===== UI ===== */
-// ... trong MonitoringScreen.jsx
-const renderItem = useCallback(({ item }) => {
-  const icon =
-    selectedDevice?.deviceStatus === 'offline'
-      ? plugOffline
-      : (item.visualStatus === 'charging'
-          ? plugCharging
-          : (item.visualStatus === 'ready' ? plugOnline : plugOffline));
+  const renderItem = useCallback(({ item }) => {
+    const icon =
+      selectedDevice?.deviceStatus === 'offline'
+        ? plugOffline
+        : (item.visualStatus === 'charging'
+            ? plugCharging
+            : (item.visualStatus === 'ready' ? plugOnline : plugOffline));
 
-  const portLabel = `${t('port')} ${item.name}`;
+    const portLabel = `${t('port')} ${item.name}`;
 
+    return (
+      <View style={[styles.portCard, { marginHorizontal: 16 }]}>
+        <Text style={styles.portTitle}>{t('portCardTitle', selectedDevice?.name, portLabel)}</Text>
 
-  return (
-    <View style={[styles.portCard, { marginHorizontal: 16 }]}>
-      <Text style={styles.portTitle}>{t('portCardTitle', selectedDevice?.name, portLabel)}</Text>
-
-      <View style={styles.portStatusWrap}>
-        <View style={styles.portIconWrap}>
-          <Image source={icon} style={styles.portIcon} resizeMode="contain" />
+        <View style={styles.portStatusWrap}>
+          <View style={styles.portIconWrap}>
+            <Image source={icon} style={styles.portIcon} resizeMode="contain" />
+          </View>
+          <View>
+            <Text style={styles.portStatusLabel}>{t('status')}</Text>
+            <Text style={[styles.portStatusValue, { color: STATUS_COLOR[item.portTextStatus] || '#333' }]}>
+              {t(item.portTextStatus)}
+            </Text>
+          </View>
         </View>
-        <View>
-          <Text style={styles.portStatusLabel}>{t('status')}</Text>
-          <Text style={[styles.portStatusValue, { color: STATUS_COLOR[item.portTextStatus] || '#333' }]}>
-            {t(item.portTextStatus)}
-          </Text>
+
+        <View style={styles.row}><Text style={styles.kv}>{t('start')}</Text><Text style={styles.v}>{item.start}</Text></View>
+        <View style={styles.row}><Text style={styles.kv}>{t('end')}</Text><Text style={styles.v}>{item.end}</Text></View>
+        <View style={styles.row}>
+          <Text style={styles.kv}>{t('power')}</Text>
+          <Text style={styles.v}>{formatPowerKW(item.kw)}</Text>
         </View>
-        
-         
+        <View style={styles.row}>
+          <Text style={styles.kv}>{t('energy')}</Text>
+          <Text style={styles.v}>{formatEnergyKWh(item.kwh)}</Text>
+        </View>
+
+        <View style={styles.cardActions}>
+          <TouchableOpacity
+            style={styles.btnDetail}
+            onPress={() => handleOpenPortModal(item)}
+            activeOpacity={0.85}
+          >
+            <Icon name="visibility" size={18} color="#2563EB" style={{ marginRight: 6 }} />
+            <Text style={styles.btnDetailText}>{t('viewDetail')}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
-
-      <View style={styles.row}><Text style={styles.kv}>{t('start')}</Text><Text style={styles.v}>{item.start}</Text></View>
-      <View style={styles.row}><Text style={styles.kv}>{t('end')}</Text><Text style={styles.v}>{item.end}</Text></View>
-      <View style={styles.row}>
-        <Text style={styles.kv}>{t('power')}</Text>
-        <Text style={styles.v}>{formatPowerKW(item.kw)}</Text>
-      </View>
-      <View style={styles.row}>
-        <Text style={styles.kv}>{t('energy')}</Text>
-        <Text style={styles.v}>{formatEnergyKWh(item.kwh)}</Text>
-      </View>
-
-
-          <View style={styles.cardActions}>
-    <TouchableOpacity
-       style={styles.btnDetail}
-       onPress={() => handleOpenPortModal(item)}
-       activeOpacity={0.85}
-      >
-        <Icon name="visibility" size={18} color="#2563EB" style={{ marginRight: 6 }} />
-       <Text style={styles.btnDetailText}>{t('viewDetail')}</Text>
-      </TouchableOpacity>
-    </View>
-
-      {/* vẫn cho tap cả card để mở modal */}
-     
-    </View>
-  );
-}, [selectedDevice, t]);
-
+    );
+  }, [selectedDevice, t]);
 
   const ListHeader = (
     <View style={{ paddingHorizontal: 16, paddingTop: 10 }}>
@@ -977,6 +930,40 @@ const renderItem = useCallback(({ item }) => {
       <Text style={styles.deviceSub}>{headerPortsText}</Text>
     </View>
   );
+
+ const EmptyState = () => (
+  <View style={styles.emptyWrap}>
+    <View style={styles.emptyBadge}>
+      <Icon name="energy" size={26} color="#2563EB" />
+    </View>
+
+    <Text style={styles.emptyTitle}>{t('noDevicesTitle')}</Text>
+    <Text style={styles.emptyDesc}>{t('noDevicesDesc')}</Text>
+
+    <View style={styles.emptyActions}>
+      <TouchableOpacity
+        onPress={() => onRefresh()}
+        style={styles.emptyPrimaryBtn}
+        activeOpacity={0.9}
+      >
+        <Icon name="refresh" size={18} color="#fff" style={{ marginRight: 6 }} />
+        <Text style={styles.emptyPrimaryText}>{t('tryAgain')}</Text>
+      </TouchableOpacity>
+
+      <View style={{ width: 10 }} />
+
+      {/* <TouchableOpacity
+        onPress={() => toast('Chức năng thêm thiết bị sẽ có ở màn Thiết bị')}
+        style={styles.emptyGhostBtn}
+        activeOpacity={0.9}
+      >
+        <Icon name="add" size={18} color="#2563EB" style={{ marginRight: 6 }} />
+        <Text style={styles.emptyGhostText}>Thêm thiết bị</Text>
+      </TouchableOpacity> */}
+    </View>
+  </View>
+);
+
 
   return (
     <View style={styles.container}>
@@ -1001,11 +988,17 @@ const renderItem = useCallback(({ item }) => {
             keyExtractor={(x) => String(x.id)}
             renderItem={({ item }) => (
               <TouchableOpacity
-                onPress={() => { setSelectedId(item.id); closeDrawer(); }}
+                onPress={() => {
+                  // clear “bóng ma” trước khi đổi id
+                  baseDeviceRef.current = null;
+                  setSelectedDevice(null);
+                  setSelectedId(item.id);
+                  closeDrawer();
+                }}
                 style={[styles.deviceMenuItem, selectedId === item.id && { borderColor: '#111827', backgroundColor: '#f7faff' }]}
               >
                 <View style={styles.deviceMenuIcon}><Icon name="memory" size={16} color="#fff" /></View>
-                <View  >
+                <View>
                   <Text style={styles.deviceMenuName} numberOfLines={1}>{item.name}</Text>
                   <Text style={styles.deviceMenuPorts}>{t('ports', item.portsCount)}</Text>
                 </View>
@@ -1014,49 +1007,72 @@ const renderItem = useCallback(({ item }) => {
             )}
             ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
             contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }}
-            ListEmptyComponent={<Text style={{ color:'#6B7280', padding:16 }}>{t('loading')}</Text>}
+            ListEmptyComponent={
+              loadingList
+                ? <Text style={{ color:'#6B7280', padding:16 }}>{t('loading')}</Text>
+                : <Text style={{ color:'#6B7280', padding:16 }}>{t('noDevicesTitle')}</Text>
+            }
             showsVerticalScrollIndicator={false}
           />
         </EdgeDrawer>
       </View>
 
       {/* Main list */}
-      <View style={{ flex: 1 }}>
-        {isLoadingPorts ? (
-          <FlatList
-            data={Array.from({ length: expectedPorts })}
-            keyExtractor={(_, i) => `sk-${i}`}
-            ListHeaderComponent={ListHeader}
-            renderItem={() => <PortCardSkeleton />}
-            ItemSeparatorComponent={() => <View style={{ height: 0 }} />}
-            contentContainerStyle={{ paddingTop: 8, paddingBottom: 32 }}
-            showsVerticalScrollIndicator={false}
-          />
-        ) : (
-          <FlatList
-            data={selectedDevice?.ports || []}
-            keyExtractor={(p) => String(p.id)}
-            ListHeaderComponent={ListHeader}
-            renderItem={renderItem}
-            ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-            contentContainerStyle={{ paddingTop: 8,  paddingBottom: (BottomTabNavigation.TAB_BAR_HEIGHT || 72) + 24, }}
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            removeClippedSubviews={false}
-            initialNumToRender={32}
-            maxToRenderPerBatch={32}
-            windowSize={10}
-            onEndReachedThreshold={0.1}
-            showsVerticalScrollIndicator={false}
-          />
-        )}
-      </View>
+      {/* Main list */}
+<View style={{ flex: 1 }}>
+  {showEmpty ? (
+    <ScrollView
+      contentContainerStyle={{
+        paddingTop: headerHeight + 24,   // ⬅️ đẩy xuống dưới header
+        paddingBottom: (BottomTabNavigation.TAB_BAR_HEIGHT || 72) + 24,
+        flexGrow: 1,
+      }}
+      showsVerticalScrollIndicator={false}
+    >
+      <EmptyState />
+    </ScrollView>
+  ) : isLoadingPorts ? (
+    <FlatList
+      data={Array.from({ length: expectedPorts })}
+      keyExtractor={(_, i) => `sk-${i}`}
+      ListHeaderComponent={ListHeader}
+      renderItem={() => <PortCardSkeleton />}
+      ItemSeparatorComponent={() => <View style={{ height: 0 }} />}
+      contentContainerStyle={{
+        paddingTop: headerHeight + 8,    // ⬅️ tránh đè header
+        paddingBottom: 32,
+      }}
+      showsVerticalScrollIndicator={false}
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+    />
+  ) : (
+    <FlatList
+      data={selectedDevice?.ports || []}
+      keyExtractor={(p) => String(p.id)}
+      ListHeaderComponent={ListHeader}
+      renderItem={renderItem}
+      ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+      contentContainerStyle={{
+        paddingTop: headerHeight + 8,    // ⬅️ tránh đè header
+        paddingBottom: (BottomTabNavigation.TAB_BAR_HEIGHT || 72) + 24,
+      }}
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+      removeClippedSubviews={false}
+      initialNumToRender={32}
+      maxToRenderPerBatch={32}
+      windowSize={10}
+      onEndReachedThreshold={0.1}
+      showsVerticalScrollIndicator={false}
+    />
+  )}
+</View>
+
 
       {/* CENTER MODAL có QR */}
-     {/* CENTER MODAL có QR */}
- <ModalLike {...modalProps}>
+      <ModalLike {...modalProps}>
         {Platform.OS === 'web' ? (
-          // WebModal đã có overlay + container
           <ModalContent
             t={t}
             headerName={selectedDevice?.name || ''}
@@ -1067,7 +1083,6 @@ const renderItem = useCallback(({ item }) => {
             qrRef={qrRef}
           />
         ) : (
-          // Native: tự bọc overlay nền mờ
           <Pressable style={styles.modalOverlay} onPress={handleClosePortModal}>
             <View style={styles.modalContainer} onStartShouldSetResponder={() => true}>
               <ModalContent
@@ -1083,8 +1098,6 @@ const renderItem = useCallback(({ item }) => {
           </Pressable>
         )}
       </ModalLike>
-
-
     </View>
   );
 }
@@ -1093,17 +1106,72 @@ const renderItem = useCallback(({ item }) => {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F6F7FB' },
 
- header: {
-  backgroundColor: '#4A90E2',
-  paddingHorizontal: 20,
-  paddingVertical: 15,
-  paddingTop: 25,
-  flexDirection: 'row',
-  alignItems: 'center',
-  position: Platform.OS === 'web' ? 'fixed' : 'absolute',  // web dùng fixed, native absolute
-  top: 0, left: 0, right: 0,
-  zIndex: 1000,
-},
+  header: {
+    backgroundColor: '#4A90E2',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    paddingTop: 25,
+    flexDirection: 'row',
+    alignItems: 'center',
+    position: Platform.OS === 'web' ? 'fixed' : 'absolute',
+    top: 0, left: 0, right: 0,
+    zIndex: 1000,
+  },
+
+    /* ===== Empty state ===== */
+  emptyWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  emptyBadge: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: '#E8F1FF',
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 10, shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
+    marginBottom: 12,
+  },
+  emptyTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
+  emptyDesc: {
+    marginTop: 6,
+    fontSize: 13,
+    color: '#6B7280',
+    textAlign: 'center',
+    maxWidth: 420,
+  },
+  emptyActions: { flexDirection: 'row', marginTop: 14 },
+
+  emptyPrimaryBtn: {
+    backgroundColor: '#2563EB',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 120,
+    justifyContent: 'center',
+    shadowColor: '#2563EB',
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
+  },
+  emptyPrimaryText: { color: '#fff', fontWeight: '800' },
+
+  emptyGhostBtn: {
+    borderWidth: 1,
+    borderColor: '#2563EB',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 140,
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+  },
+  emptyGhostText: { color: '#2563EB', fontWeight: '800' },
 
   menuButton: { padding: 4, marginRight: 8 },
   headerTitle: { color: 'white', fontSize: 18, fontWeight: '600', flex: 1 },
@@ -1186,32 +1254,29 @@ const styles = StyleSheet.create({
     top: 0, right: 0, bottom: 0, left: 0,
     backgroundColor: 'rgba(0,0,0,0.5)',
     padding: 20,
-    zIndex: 2147483647, // max để khỏi bị layer khác đè
+    zIndex: 2147483647,
     justifyContent: 'center',
     alignItems: 'center',
-   
   },
 
-  modalContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    width: '100%',
-    maxWidth: 450,
-    maxHeight: '85%',   // container giới hạn chiều cao
-    overflow: 'hidden', // để ScrollView không tràn
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.25,
-    shadowRadius: 20,
-    elevation: 10,
-  },
+ modalContainer: {
+  backgroundColor: '#fff',
+  borderRadius: 20,
+  width: '100%',
+  maxWidth: 450,
+  height: 'auto',               
+  maxHeight: '85%',
+  overflow: 'hidden',
+  shadowColor: '#000',
+  shadowOffset: { width: 0, height: 10 },
+  shadowOpacity: 0.25,
+  shadowRadius: 20,
+  elevation: 10,
+  willChange: 'transform',      
+},
 
-    modalScroll: {
-    flexGrow: 0,          // đừng giãn vô hạn
-  },
-  modalScrollContent: {
-    paddingBottom: 20,    // chừa đáy để kéo hết
-  },
+  modalScroll: { flexGrow: 0 },
+  modalScrollContent: { paddingBottom: 20 },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1236,19 +1301,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#111827',
-  },
-  modalSubtitle: {
-    fontSize: 13,
-    color: '#6B7280',
-    marginTop: 2,
-  },
-  modalContent: {
-    padding: 20,
-  },
+  modalTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
+  modalSubtitle: { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  modalContent: { padding: 20 },
   modalInfoCard: {
     backgroundColor: '#F8FAFC',
     borderRadius: 16,
@@ -1263,19 +1318,11 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#E5E7EB',
   },
-  modalInfoKey: {
-    fontSize: 14,
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  modalInfoValue: {
-    fontSize: 14,
-    color: '#111827',
-    fontWeight: '700',
-  },
+  modalInfoKey: { fontSize: 14, color: '#6B7280', fontWeight: '500' },
+  modalInfoValue: { fontSize: 14, color: '#111827', fontWeight: '700' },
 
   // QR area
-  qrWrap: { alignItems: 'center', marginTop: 5,width:'100%' },
+  qrWrap: { alignItems: 'center', marginTop: 5, width:'100%' },
   qrBox: {
     backgroundColor: '#fff',
     padding: 12,
@@ -1288,7 +1335,7 @@ const styles = StyleSheet.create({
   },
   qrHint: { marginTop: 2, fontSize: 12, color: '#6B7280', textAlign:'center' },
 
-  modalActions: { flexDirection: 'row', marginTop: 14,width:'100%',columnGap:10 },
+  modalActions: { flexDirection: 'row', marginTop: 14, width:'100%', columnGap:10 },
 
   btnPrimary: {
     backgroundColor: '#2563EB',
@@ -1298,15 +1345,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
-     paddingHorizontal: 14, 
+    paddingHorizontal: 14,
   },
-  btnPrimaryText: { color: '#fff', fontWeight: '600',fontSize:14 },
+  btnPrimaryText: { color: '#fff', fontWeight: '600', fontSize:14 },
 
   btnGhost: {
     borderWidth: 1, borderColor: '#2563EB', borderRadius: 12,
     paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     flex: 1,
-      paddingHorizontal: 14, 
+    paddingHorizontal: 14,
   },
-  btnGhostText: { color: '#2563EB', fontWeight: '600',fontSize:14 },
+  btnGhostText: { color: '#2563EB', fontWeight: '600', fontSize:14 },
 });

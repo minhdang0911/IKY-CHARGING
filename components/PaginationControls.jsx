@@ -1,6 +1,6 @@
 // components/PaginationControls.jsx
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 
 export default function PaginationControls({ page, totalPages, onPrev, onNext }) {
@@ -8,57 +8,77 @@ export default function PaginationControls({ page, totalPages, onPrev, onNext })
   const canNext = page < totalPages;
 
   return (
-    <View style={styles.pager}>
+    <View style={styles.container}>
       <TouchableOpacity
-        style={[styles.pagerBtn, !canPrev && styles.pagerBtnDisabled]}
-        disabled={!canPrev}
+        style={[styles.button, !canPrev && styles.disabled]}
         onPress={onPrev}
+        disabled={!canPrev}
       >
-        <Icon name="chevron-left" size={22} color={canPrev ? '#2563EB' : '#94a3b8'} />
-        <Text style={[styles.pagerText, { color: canPrev ? '#2563EB' : '#94a3b8' }]}>
-          Trước
-        </Text>
+        <Icon
+          name="chevron-left"
+          size={22}
+          color={canPrev ? '#1d4ed8' : '#94a3b8'}
+        />
+        <Text style={[styles.text, !canPrev && styles.textDisabled]}>Trước</Text>
       </TouchableOpacity>
 
-      <Text style={styles.pagerInfo}>
+      <Text style={styles.pageInfo}>
         Trang <Text style={styles.bold}>{page}</Text> / {totalPages}
       </Text>
 
       <TouchableOpacity
-        style={[styles.pagerBtn, !canNext && styles.pagerBtnDisabled]}
-        disabled={!canNext}
+        style={[styles.button, !canNext && styles.disabled]}
         onPress={onNext}
+        disabled={!canNext}
       >
-        <Text style={[styles.pagerText, { color: canNext ? '#2563EB' : '#94a3b8' }]}>
-          Sau
-        </Text>
-        <Icon name="chevron-right" size={22} color={canNext ? '#2563EB' : '#94a3b8'} />
+        <Text style={[styles.text, !canNext && styles.textDisabled]}>Sau</Text>
+        <Icon
+          name="chevron-right"
+          size={22}
+          color={canNext ? '#1d4ed8' : '#94a3b8'}
+        />
       </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  pager: {
+  container: {
     flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e5e7eb',
+    gap: 24,
+    paddingVertical: Platform.OS === 'web' ? 14 : 10,
     backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
   },
-  pagerBtn: {
+  button: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    backgroundColor: '#e0e7ff',
     borderRadius: 999,
-    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
-  pagerBtnDisabled: { backgroundColor: '#f1f5f9' },
-  pagerText: { fontSize: 14, fontWeight: '700' },
-  pagerInfo: { fontSize: 14, color: '#334155', fontWeight: '600' },
-  bold: { fontWeight: '800', color: '#111827' },
+  disabled: {
+    backgroundColor: '#f1f5f9',
+  },
+  text: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1d4ed8',
+  },
+  textDisabled: {
+    color: '#94a3b8',
+  },
+  pageInfo: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1e293b',
+  },
+  bold: {
+    fontWeight: '800',
+    color: '#111827',
+  },
 });
