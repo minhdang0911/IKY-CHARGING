@@ -747,36 +747,71 @@ useEffect(() => {
       </View>
 
       {/* Drawer */}
-      <View pointerEvents="box-none" style={{ position:'absolute', left:0, right:0, bottom:0, top:headerHeight, zIndex:9998 }}>
-        <EdgeDrawer visible={drawerOpen} onClose={closeDrawer}>
-          <View style={styles.drawerHeader}>
-            <View className="drawerBadge" style={styles.drawerBadge}><Icon name="ev-station" size={16} color="#fff" /></View>
-            <Text style={styles.drawerTitle}>{t('devices')}</Text>
-          </View>
-          <View style={{ height: 8 }} />
-          <FlatList
-            data={devicesMenu}
-            keyExtractor={(x) => String(x.id)}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                onPress={() => { setSelectedId(item.id); closeDrawer(); }}
-                style={[styles.deviceMenuItem, selectedId === item.id && { borderColor: '#111827', backgroundColor: '#f7faff' }]}
-              >
-                <View style={styles.deviceMenuIcon}><Icon name="memory" size={16} color="#fff" /></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.deviceMenuName} numberOfLines={1}>{item.name}</Text>
-                  <Text style={styles.deviceMenuPorts}>{t('ports', item.portsCount)}</Text>
-                </View>
-                <Icon name="chevron-right" size={22} color="#9CA3AF" />
-              </TouchableOpacity>
-            )}
-            ItemSeparatorComponent={() => <View style={{ height: 6 }} />}
-            contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 16 }}
-            ListEmptyComponent={<Text style={{ color:'#6B7280', padding:16 }}>{t('loading')}</Text>}
-            showsVerticalScrollIndicator={false}
-          />
-        </EdgeDrawer>
+     <View
+  pointerEvents="box-none"
+  style={{
+    position: 'absolute',
+    left: 0, right: 0, bottom: 0, top: headerHeight,
+    zIndex: 999999,        // giữ cao tối đa
+    elevation: 999999,     // Android
+    overflow: 'visible',
+  }}
+>
+  <EdgeDrawer visible={drawerOpen} onClose={closeDrawer}>
+    <View style={styles.drawerHeader}>
+      <View className="drawerBadge" style={styles.drawerBadge}>
+        <Icon name="ev-station" size={16} color="#fff" />
       </View>
+      <Text style={styles.drawerTitle}>{t('devices')}</Text>
+    </View>
+
+    <View style={{ height: 6 }} />
+
+    <FlatList
+      data={devicesMenu}
+      keyExtractor={(x) => String(x.id)}
+      renderItem={({ item }) => (
+        <TouchableOpacity
+          onPress={() => { setSelectedId(item.id); closeDrawer(); }}
+          style={[
+            styles.deviceMenuItemCompact, // dùng style compact mới
+            selectedId === item.id && {
+              borderColor: '#111827',
+              backgroundColor: '#f7faff',
+            },
+          ]}
+        >
+          <View style={styles.deviceMenuIconCompact}>
+            <Icon name="memory" size={14} color="#fff" />
+          </View>
+
+          <View style={{ flex: 1 }}>
+            <Text style={styles.deviceMenuNameCompact} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={styles.deviceMenuPortsCompact}>
+              {t('ports', item.portsCount)}
+            </Text>
+          </View>
+
+          <Icon name="chevron-right" size={20} color="#9CA3AF" />
+        </TouchableOpacity>
+      )}
+      ItemSeparatorComponent={() => <View style={{ height: 4 }} />}
+      contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: 12 }}
+      ListEmptyComponent={
+        <Text style={{ color: '#6B7280', padding: 12 }}>{t('loading')}</Text>
+      }
+      showsVerticalScrollIndicator={true}   // 🔥 bật thanh cuộn
+      // Giới hạn render cho mượt
+      removeClippedSubviews={true}
+      initialNumToRender={20}
+      maxToRenderPerBatch={20}
+      windowSize={7}
+    />
+  </EdgeDrawer>
+</View>
+
 
       {/* Main list */}
       <View style={{ flex: 1 }}>
@@ -1086,4 +1121,35 @@ const styles = StyleSheet.create({
     paddingVertical: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'center'
   },
   btnGhostText: { color: '#2563EB', fontWeight: '800' },
+
+    deviceMenuItemCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,          // ↓ nhỏ hơn
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 10,            // ↓ bo ít hơn
+    backgroundColor: '#fff',
+  },
+  deviceMenuIconCompact: {
+    backgroundColor: '#4A90E2',
+    borderRadius: 7,
+    padding: 5,                  // ↓ nhỏ hơn
+    marginRight: 10,
+    width: 24,                   // ↓ nhỏ hơn
+    height: 24,                  // ↓ nhỏ hơn
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deviceMenuNameCompact: {
+    fontSize: 13,                // ↓ nhỏ hơn
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 1,
+  },
+  deviceMenuPortsCompact: {
+    fontSize: 11,                // ↓ nhỏ hơn
+    color: '#6B7280',
+  },
 });
