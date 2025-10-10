@@ -166,7 +166,8 @@ export default function HistoryExtend({ navigateToScreen }) {
           </View>
 
           <View style={[styles.statusPill, { backgroundColor: `${color}1A`, borderColor: color }]}>
-            <Icon name="receipt-long" size={14} color={color} />
+            {/* <Icon name="receipt-long" size={14} color={color} /> */}
+         
             <Text style={[styles.statusText, { color }]}>{viStatus(st)}</Text>
           </View>
         </View>
@@ -215,7 +216,7 @@ export default function HistoryExtend({ navigateToScreen }) {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={goBack} style={styles.backButton}>
-          <Icon name="arrow-back" size={24} color="#fff" />
+    <Text style={{fontSize: 30, color: '#fff'}}>{'‹'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Lịch sử đơn hàng</Text>
         <View style={{ width: 24 }} />

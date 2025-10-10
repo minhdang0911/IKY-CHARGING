@@ -236,8 +236,9 @@ export default function EdgeDrawer({
 
 const styles = StyleSheet.create({
   drawer: {
-    position: 'absolute',
+    position: 'fixed',
     left: 0,
+    height:'100%',
     backgroundColor: '#fff',
     borderTopRightRadius: 24,      // 🔥 bo góc phải
     borderBottomRightRadius: 24,   // 🔥 bo góc phải
@@ -247,7 +248,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingHorizontal: 16,          // 🔥 FIX: thêm padding ngang
     paddingBottom: 16,              // 🔥 FIX: thêm padding dưới
-    overflow: 'hidden',             // 🔥 để inner shadow hoạt động
+    
   },
   innerShadow: {
     position: 'absolute',
