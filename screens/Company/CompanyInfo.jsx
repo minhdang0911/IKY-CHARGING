@@ -4,6 +4,7 @@ import {
   Image,
   Linking,
   SafeAreaView,
+  ScrollView,
   Text,
   TouchableOpacity,
   View,
@@ -111,7 +112,7 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
       <View style={s.rowTextWrap}>
         <Text style={s.rowLabel}>{label}</Text>
         <Text
-          style={[s.rowValue, isLink && { textDecorationLine: 'underline', color: PRIMARY }]}
+          style={[s.rowValue, isLink && { textDecorationLine: 'underline', color: PRIMARY ,fontSize:12}]}
           numberOfLines={2}
           ellipsizeMode="tail"
         >
@@ -134,7 +135,11 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
       </View>
 
       {/* Content */}
-      <View style={[s.page, { minHeight: height - 72 }]}>
+      <ScrollView 
+        style={{ flex: 1 }}
+        contentContainerStyle={[s.page, { paddingBottom: 88 }]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={[s.grid, isDesktop && s.gridDesktop]}>
           {/* Brand card */}
           <View style={s.brandCard}>
@@ -208,7 +213,7 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
                 <Text style={s.actionTextGhost}>{t('mail')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.actionBtnGhost} onPress={() => openWebsite('https://iky.vn')} activeOpacity={0.9}>
-                 
+                <Icon name="language" size={18} color={PRIMARY} />
                 <Text style={s.actionTextGhost}>{t('openSite')}</Text>
               </TouchableOpacity>
             </View>
@@ -218,7 +223,7 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -237,10 +242,10 @@ const s = StyleSheet.create({
     borderColor: '#e5e7eb',
     backgroundColor: '#4A90E2',
   },
-  backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' ,color: 'white'},
+  backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', color: 'white' },
   headerTitle: { flex: 1, textAlign: 'center', fontSize: 16, fontWeight: '800', color: 'white' },
 
-  page: { flex: 1, paddingHorizontal: 16, paddingVertical: 16 },
+  page: { paddingHorizontal: 16, paddingVertical: 16 },
   grid: { width: '100%', maxWidth: 1100, alignSelf: 'center' },
   gridDesktop: { flexDirection: 'row', gap: 20 },
 
@@ -264,61 +269,88 @@ const s = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 12,
     paddingHorizontal: 14,
-    borderWidth: 1, borderColor: '#e5e7eb',
+    borderWidth: 1, 
+    borderColor: '#e5e7eb',
   },
-  statItem: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
+  statItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 10 },
   statVal: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
   statLbl: { fontSize: 12, color: '#64748b' },
   sep: { width: 1, height: 28, backgroundColor: '#e5e7eb', marginHorizontal: 8 },
 
   infoCard: {
-    flex: 1.2,
+    flex: 1,
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 16,
-    borderWidth: 1, borderColor: '#e5e7eb',
-    shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 12, shadowOffset: { width: 0, height: 6 },
+    borderWidth: 1, 
+    borderColor: '#e5e7eb',
+    shadowColor: '#000', 
+    shadowOpacity: 0.06, 
+    shadowRadius: 12, 
+    shadowOffset: { width: 0, height: 6 },
+    fontSize: 8,
   },
 
-row: {
-  flexDirection: 'row',
-  alignItems: 'flex-start', // 🟢 fix chữ không bị dọc
-  flexWrap: 'wrap',         // 🟢 cho phép xuống dòng khi nhỏ
-  paddingVertical: 10,
-},
+  row: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    flexWrap: 'wrap',
+    paddingVertical: 10,
+  },
 
   rowIconBox: {
-  width: 36, height: 36, borderRadius: 8,
-  backgroundColor: '#eff6ff',
-  alignItems: 'center', justifyContent: 'center',
-  marginRight: 10,
-  borderWidth: 1, borderColor: '#e0f2fe',
-  alignSelf: 'flex-start', // 🟢 giữ icon top align
-},
+    width: 36, 
+    height: 36, 
+    borderRadius: 8,
+    backgroundColor: '#eff6ff',
+    alignItems: 'center', 
+    justifyContent: 'center',
+    marginRight: 10,
+    borderWidth: 1, 
+    borderColor: '#e0f2fe',
+    alignSelf: 'flex-start',
+  },
 
-  rowTextWrap: { flex: 1 },
+  
   rowLabel: { fontSize: 12, color: '#64748b' },
-  rowValue: { fontSize: 14.5, color: '#0f172a', fontWeight: '600', marginTop: 2 },
+  rowValue: { fontSize: 12, color: '#0f172a', fontWeight: '600', marginTop: 2 },
   divider: { height: 1, backgroundColor: '#eef2f7' },
 
   sectionTitle: { marginTop: 14, marginBottom: 8, fontSize: 13, fontWeight: '800', color: '#334155' },
 
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   actionBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: PRIMARY, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14,
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 8,
+    backgroundColor: PRIMARY, 
+    borderRadius: 12, 
+    paddingVertical: 10, 
+    paddingHorizontal: 14,
   },
   actionText: { color: '#fff', fontWeight: '800' },
   actionBtnGhost: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: '#eef2ff', borderColor: '#dbeafe', borderWidth: 1,
-    borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14,
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 8,
+    backgroundColor: '#eef2ff', 
+    borderColor: '#dbeafe', 
+    borderWidth: 1,
+    borderRadius: 12, 
+    paddingVertical: 10, 
+    paddingHorizontal: 14,
   },
   actionTextGhost: { color: PRIMARY, fontWeight: '800' },
 
   closeGhost: {
-    marginTop: 12, alignSelf: 'flex-start',
-    paddingVertical: 8, paddingHorizontal: 10,
+   flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 8,
+    backgroundColor: PRIMARY, 
+    borderRadius: 12, 
+    paddingVertical: 10, 
+    paddingHorizontal: 14,
+    marginTop: 10,
   },
-  closeGhostText: { color: '#64748b', textDecorationLine: 'underline', fontWeight: '600' },
+  closeGhostText: {color: '#fff', fontWeight: '800',textAlign: 'center', flex: 1 },
 });
