@@ -1,3 +1,4 @@
+// screens/Auth/LoginScreen.tsx — SINGLE FORM, CLEAN WEB UI
 import React, { useRef, useState } from 'react';
 import {
   StyleSheet, View, Text, TouchableOpacity, Image, Animated, Platform,
@@ -8,7 +9,6 @@ import { showMessage } from '../../components/Toast/Toast';
 import useLogin from '../../Hooks/useLogin';
 import FloatingTextField from '../../components/form/FloatingTextField';
 import LangSheet from '../../components/auth/LangSheet';
-import { STRINGS } from '../../i18n/strings';
 
 const logo = require('../../assets/img/ic_launcher.png');
 const isWeb = Platform.OS === 'web';
@@ -28,112 +28,121 @@ export default function LoginScreen({ navigateToScreen, login }) {
     usernameFocused, passwordFocused,
     onFocusU, onBlurU, onFocusP, onBlurP,
     shakeAnim, submit, t,
-  } = useLogin({
-    notify: showMessage,
-    onSuccess: () => {},
-  });
+  } = useLogin({ notify: showMessage, onSuccess: () => {} });
 
   const disabled = !username || !password || loading;
 
-  // wrapper: web không dùng Pressable để khỏi chặn click vào input
   const Wrapper = isWeb ? View : Pressable;
-  const wrapperProps = isWeb
-    ? {}
-    : { onPress: Keyboard.dismiss, style: { flex: 1 } };
+  const wrapperProps = isWeb ? {} : { onPress: Keyboard.dismiss, style: { flex: 1 } };
 
   return (
-    <KeyboardAvoidingView
-      style={s.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
+    <KeyboardAvoidingView style={s.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* subtle gradient strip */}
+      <View style={s.bgTop} />
+
       <ScrollView
-        contentContainerStyle={s.scrollContent}
+        contentContainerStyle={s.center}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         bounces={false}
       >
-        <View style={s.headerBg} />
-
         <Wrapper {...wrapperProps} pointerEvents={isWeb ? 'box-none' : 'auto'}>
-          <View style={s.formWrap}>
-            <View style={s.topBrand}>
-              <Image source={logo} style={s.logoImage} resizeMode="contain" />
-              <Text style={s.title}>{t('welcome')}</Text>
-              <Text style={s.subtitle}>{t('sub')}</Text>
+          <Animated.View
+            style={[
+              s.card,
+              {
+                transform: [{
+                  translateX: shakeAnim.interpolate({ inputRange: [-1, 0, 1], outputRange: [-8, 0, 8] })
+                }]
+              }
+            ]}
+          >
+            {/* brand */}
+            <View style={s.brandWrap}>
+              <Image source={logo} style={s.logo} />
+              <Text style={s.brandText}>IKY CHARGING</Text>
             </View>
 
-            <Animated.View
-              style={[
-                s.card,
-                { transform: [{ translateX: shakeAnim.interpolate({
-                    inputRange: [-1,0,1], outputRange: [-8,0,8]
-                }) }] }
-              ]}
-            >
-              <FloatingTextField
-                value={username}
-                onChangeText={(v) => { setUsername(v); if (!v) setErrorText(''); }}
-                label={t('usernameLabel')}
-                icon="person"
-                focused={usernameFocused}
-                onFocus={onFocusU}
-                onBlur={onBlurU}
-                animValue={usernameLabelAnim}
-                returnKeyType="next"
-                onSubmitEditing={() => passwordRef.current?.focus()}
-                autoComplete="username"
-                rightSlot={null}
-              />
+            <Text style={s.title}>{t('welcome')}</Text>
+            <Text style={s.subtitle}>{t('sub')}</Text>
 
-              <View>
-                <FloatingTextField
-                  value={password}
-                  onChangeText={(v) => { setPassword(v); if (!v) setErrorText(''); }}
-                  label={t('passwordLabel')}
-                  icon="lock"
-                  focused={passwordFocused}
-                  onFocus={onFocusP}
-                  onBlur={onBlurP}
-                  animValue={passwordLabelAnim}
-                  inputRef={passwordRef}
-                  autoComplete="password"
-                  secureTextEntry={!showPassword}
-                  returnKeyType="done"
-                  onSubmitEditing={() => submit({ externalLoginCallback: login })}
-                  rightSlot={
-                    <TouchableOpacity style={{ padding: 6 }} onPress={() => setShowPassword(s => !s)}>
-                      <Icon name={showPassword ? 'visibility' : 'visibility-off'} size={18} color="#9aa0a6" />
-                    </TouchableOpacity>
-                  }
-                />
-              </View>
+            {/* fields */}
+            <FloatingTextField
+              value={username}
+              onChangeText={(v) => { setUsername(v); if (!v) setErrorText(''); }}
+              label={t('usernameLabel')}
+              icon="person"
+              focused={usernameFocused}
+              onFocus={onFocusU}
+              onBlur={onBlurU}
+              animValue={usernameLabelAnim}
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+              autoComplete="username"
+              rightSlot={null}
+            />
 
-              {!!errorText && <Text style={s.errorText}>{errorText}</Text>}
-
-              <View style={s.rowBetween}>
-                <TouchableOpacity onPress={() => setShowLangSheet(true)} style={s.quickLangBtn}>
-                  <Icon name="translate" size={16} color="#1e88e5" />
-                  <Text style={s.quickLangText}>{t('quickLang')}: {language === 'vi' ? 'VI' : 'EN'}</Text>
+            <FloatingTextField
+              value={password}
+              onChangeText={(v) => { setPassword(v); if (!v) setErrorText(''); }}
+              label={t('passwordLabel')}
+              icon="lock"
+              focused={passwordFocused}
+              onFocus={onFocusP}
+              onBlur={onBlurP}
+              animValue={passwordLabelAnim}
+              inputRef={passwordRef}
+              autoComplete="password"
+              secureTextEntry={!showPassword}
+              returnKeyType="done"
+              onSubmitEditing={() => submit({ externalLoginCallback: login })}
+              rightSlot={
+                <TouchableOpacity style={{ padding: 6 }} onPress={() => setShowPassword(s => !s)}>
+                  <Icon name={showPassword ? 'visibility' : 'visibility-off'} size={18} color="#9aa0a6" />
                 </TouchableOpacity>
-              </View>
+              }
+            />
 
-              <TouchableOpacity
-                style={[s.loginButton, disabled && { opacity: 0.6 }]}
-                onPress={() => submit({ externalLoginCallback: login })}
-                disabled={disabled}
-                activeOpacity={0.85}
-              >
-                {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.loginButtonText}>{t('login')}</Text>}
+            {!!errorText && <Text style={s.errorText}>{errorText}</Text>}
+
+            {/* helpers row */}
+            <View style={s.helpers}>
+              <TouchableOpacity onPress={() => setShowLangSheet(true)} style={s.helperBtn}>
+                <Icon name="translate" size={16} color="#2563eb" />
+                <Text style={s.helperText}>{t('quickLang')}: {language === 'vi' ? 'VI' : 'EN'}</Text>
               </TouchableOpacity>
-            </Animated.View>
 
-            <View style={s.bottomArea}>
-              <View style={s.footer}>
-                <Text style={s.footerText}>{t('support')}: 0902 806 999</Text>
-                <Text style={s.versionText}>{t('version')}: 1.125 Release</Text>
-              </View>
+              {/* <TouchableOpacity
+                onPress={() => setRemember(!remember)}
+                style={s.helperBtn}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: remember }}
+              >
+                <Icon name={remember ? 'check-box' : 'check-box-outline-blank'} size={18} color={remember ? '#2563eb' : '#94a3b8'} />
+                <Text style={s.helperText}>{t('rememberMe') ?? 'Ghi nhớ'}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity onPress={() => navigateToScreen?.('ForgotPassword')} style={s.helperBtn}>
+                <Text style={[s.helperText, { textDecorationLine: 'underline', color: '#64748b' }]}>
+                  {t('forgotPassword') ?? 'Quên mật khẩu?'}
+                </Text>
+              </TouchableOpacity> */}
             </View>
-          </View>
+
+            <TouchableOpacity
+              style={[s.loginButton, disabled && { opacity: 0.6 }]}
+              onPress={() => submit({ externalLoginCallback: login })}
+              disabled={disabled}
+              activeOpacity={0.9}
+            >
+              {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.loginText}>{t('login')}</Text>}
+            </TouchableOpacity>
+
+            {/* <View style={s.footerRow}>
+              <Text style={s.support}>{t('support')}: 0902 806 999</Text>
+              <Text style={s.version}>{t('version')}: 1.125 Release</Text>
+            </View> */}
+          </Animated.View>
         </Wrapper>
       </ScrollView>
 
@@ -149,39 +158,54 @@ export default function LoginScreen({ navigateToScreen, login }) {
 }
 
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: 'white' },
-  scrollContent: { flexGrow: 1, paddingVertical: 18 },
-  headerBg: { position: 'absolute', top: 0, left: 0, right: 0, height: 120, backgroundColor: 'rgba(30,136,229,0.06)' },
-
-  // NEW: khung form nhỏ lại & căn giữa cho web/desktop
-  formWrap: {
-    width: '100%',
-    maxWidth: 420,          // <= thu nhỏ
-    alignSelf: 'center',
+  container: { flex: 1, backgroundColor: '#f8fafc' },
+  bgTop: {
+    position: 'absolute', top: 0, left: 0, right: 0, height: 160,
+   
   },
+center: {
+  flexGrow: 1,
+  alignItems: 'center',
+  justifyContent: 'center', // 🟢 căn giữa dọc luôn
+  minHeight: '100vh',       // 🟢 quan trọng: để web chiếm đủ chiều cao viewport
+  padding: 16,
+},
 
-  topBrand: { alignItems: 'center', marginTop: 8, marginBottom: 8, paddingHorizontal: 16 },
-  logoImage: { width: 84, height: 84, marginBottom: 6 },  // <= nhỏ hơn
-  title: { fontSize: 20, fontWeight: '700', color: '#0f172a' },
-  subtitle: { fontSize: 13, color: '#64748b', marginTop: 4 },
-
+  // SINGLE CARD
   card: {
-    marginHorizontal: 12, marginTop: 12, backgroundColor: '#ffffff',
-    borderRadius: 14, padding: 14,
-    elevation: 4, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 8, shadowOffset: { width: 0, height: 3 },
-    borderWidth: 1, borderColor: '#eef2f7',
+    width: '100%',
+    maxWidth: 460,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1, borderColor: '#e2e8f0',
+    shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 16, shadowOffset: { width: 0, height: 8 },
   },
 
-  errorText: { color: '#d93025', fontSize: 12, marginTop: -4, marginBottom: 8, textAlign: 'right' },
-  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2, marginBottom: 10 },
-  quickLangBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4, paddingHorizontal: 6 },
-  quickLangText: { color: '#1e88e5', fontSize: 13, fontWeight: '700' },
+  brandWrap: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', marginBottom: 6, gap: 8 },
+  logo: { width: 44, height: 44 },
+  brandText: { fontSize: 16, fontWeight: '800', letterSpacing: 1, color: '#1f2937' },
 
-  loginButton: { backgroundColor: '#1e88e5', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 6 },
-  loginButtonText: { color: 'white', fontSize: 15.5, fontWeight: '700', textAlign: 'center' },
+  title: { fontSize: 24, fontWeight: '800', color: '#0f172a', textAlign: 'center', marginTop: 6 },
+  subtitle: { fontSize: 13, color: '#64748b', textAlign: 'center', marginBottom: 12 },
 
-  bottomArea: { alignItems: 'center', marginTop: 16, paddingHorizontal: 16 },
-  footer: { alignItems: 'center', paddingTop: 4, paddingBottom: 10 },
-  footerText: { color: '#1e88e5', fontSize: 13, fontWeight: '500', marginBottom: 4 },
-  versionText: { color: '#94a3b8', fontSize: 12 },
+  errorText: { color: '#d93025', fontSize: 12, marginTop: -2, marginBottom: 6, textAlign: 'right' },
+
+  helpers: {
+    marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8
+  },
+  helperBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
+  helperText: { fontSize: 13, color: '#334155', fontWeight: '600' },
+
+  loginButton: { marginTop: 10, backgroundColor: '#2563eb', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  loginText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+
+  footerRow: { marginTop: 12, flexDirection: 'row', justifyContent: 'space-between' },
+  support: { color: '#0ea5e9', fontSize: 12.5, fontWeight: '700' },
+  version: { color: '#94a3b8', fontSize: 12 },
 });

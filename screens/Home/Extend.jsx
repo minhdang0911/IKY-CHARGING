@@ -3,12 +3,12 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, KeyboardAvoidingView,
   Platform, TextInput, Linking, ActivityIndicator, Modal, BackHandler, PanResponder,
-  Image, Animated, Easing
+  Image, Animated, Easing, useWindowDimensions
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { getPublicPricingPlans, createOrder, createOrderCash } from '../../apis/payment';
-import { getDevices } from '../../apis/devices'; // ⬅️ dùng để refetch device sau khi tạo đơn
+import { getDevices } from '../../apis/devices';
 
 // logos
 import momologo from '../../assets/img/momo.png';
@@ -91,7 +91,7 @@ const CustomSelect = ({
   }, [q, options, getLabel]);
 
   return (
-    <View style={{ marginBottom: 14 }}>
+    <View style={{ marginBottom: 10 }}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
       <TouchableOpacity
         disabled={disabled}
@@ -104,7 +104,7 @@ const CustomSelect = ({
             ? (renderValue ? renderValue(value) : <Text style={styles.selectText}>{getLabel(value)}</Text>)
             : <Text style={[styles.selectText, { color: UI.sub }]}>{placeholder}</Text>}
         </View>
-        <Icon name={rightIcon} size={22} color={UI.sub} />
+        <Icon name={rightIcon} size={20} color={UI.sub} />
       </TouchableOpacity>
 
       {/* CENTERED DIALOG */}
@@ -119,7 +119,7 @@ const CustomSelect = ({
                 </TouchableOpacity>
               </View>
 
-              {searchable && (
+              {/* {searchable && (
                 <View style={styles.searchWrap}>
                   <Icon name="search" size={18} color={UI.sub} />
                   <TextInput
@@ -137,7 +137,7 @@ const CustomSelect = ({
                     </TouchableOpacity>
                   ) : null}
                 </View>
-              )}
+              )} */}
 
               <FlatList
                 data={filtered}
@@ -182,7 +182,10 @@ const CustomSelect = ({
 
 /* ================= MAIN ================= */
 export default function Extend({ navigateToScreen, screenData }) {
-  // ⬇️ biến device thành state để có thể cập nhật realtime
+  const { width } = useWindowDimensions();
+  const isDesktop = width >= 1024;
+
+  // biến device thành state để có thể cập nhật realtime
   const [device, setDevice] = useState(screenData?.device || {});
   const agentId = device?.agent_id?._id || '';
   const deviceId = device?._id || '';
@@ -205,7 +208,7 @@ export default function Extend({ navigateToScreen, screenData }) {
 
   const navigatingRef = useRef(false);
 
-  // ✅ animation hooks đặt OUTSIDE mọi nhánh điều kiện
+  // animation badge success
   const successPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -260,21 +263,15 @@ export default function Extend({ navigateToScreen, screenData }) {
       const fresh = list.find(d => (d?._id === deviceId) || (d?.device_code === device?.device_code));
       if (fresh) {
         setDevice(fresh);
-        // nếu cổng đã bận thì clear lựa chọn cổng cũ
         if (selectedPort) {
           const latestPort = (fresh.ports || []).find(p => String(p.portNumber) === String(selectedPort.portNumber));
           const latestStatus = String(latestPort?.status || '').toLowerCase();
-          if (!IDLE_STATES.includes(latestStatus)) {
-            setSelectedPort(null);
-          }
+          if (!IDLE_STATES.includes(latestStatus)) setSelectedPort(null);
         }
       }
-    } catch {
-      // im lặng, không phá UI
-    }
+    } catch {}
   }, [deviceId, device?.device_code, selectedPort]);
 
-  // refresh ngay khi vào màn hoặc khi deviceId đổi
   useEffect(() => { refreshDevice(); }, [refreshDevice]);
 
   /* ===== OPTIONS ===== */
@@ -318,11 +315,11 @@ export default function Extend({ navigateToScreen, screenData }) {
 
   useEffect(() => { fetchPlans(); }, [fetchPlans]);
 
-  /* ===== Validate port before create (tránh race) ===== */
+  /* ===== Validate port before create ===== */
   const ensurePortStillIdle = useCallback(async (portNumber) => {
     try {
       const token = await AsyncStorage.getItem('access_token');
-      if (!token || !deviceId) return true; // không block
+      if (!token || !deviceId) return true;
       const data = await getDevices(token);
       const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
       const fresh = list.find(d => (d?._id === deviceId) || (d?.device_code === device?.device_code));
@@ -334,7 +331,7 @@ export default function Extend({ navigateToScreen, screenData }) {
     }
   }, [deviceId, device?.device_code]);
 
-  /* ===== Create Order (branch by method) ===== */
+  /* ===== Create Order ===== */
   const handleCreateOrder = useCallback(async () => {
     if (!selectedPlan || !selectedPort || !selectedPayment) {
       setAlertMsg('Chọn gói, cổng sạc và phương thức thanh toán trước đã.');
@@ -342,7 +339,6 @@ export default function Extend({ navigateToScreen, screenData }) {
       return;
     }
 
-    // check lại port còn idle không
     const ok = await ensurePortStillIdle(selectedPort.portNumber);
     if (!ok) {
       setAlertMsg('Cổng vừa chuyển trạng thái. Vui lòng chọn lại cổng khác.');
@@ -369,7 +365,6 @@ export default function Extend({ navigateToScreen, screenData }) {
 
       const res = await api(token, payload);
 
-      // --- Chuẩn hoá response ---
       const orderId    = res?.orderId    ?? res?.order_id   ?? null;
       const paymentUrl = res?.paymentUrl ?? res?.data       ?? null;
       const amount     = res?.amount     ?? selectedPlan?.raw?.price
@@ -378,7 +373,7 @@ export default function Extend({ navigateToScreen, screenData }) {
       setOrderSuccess({
         orderId,
         paymentUrl,
-        method, // momo | vnpay | cash
+        method,
         planName: selectedPlan?.raw?.name ?? selectedPlan?.name,
         amount,
         portNumber: selectedPort?.portNumber,
@@ -423,7 +418,6 @@ export default function Extend({ navigateToScreen, screenData }) {
                   : 'Đơn hàng MoMo đã tạo.')}
           </Text>
 
-          {/* 🔥 Chỉ hiện Mã đơn khi là momo */}
           {orderSuccess.method === 'momo' && (
             <View style={styles.successInfoCard}>
               <Row k="Mã đơn" v={orderSuccess.orderId || '—'} />
@@ -471,7 +465,7 @@ export default function Extend({ navigateToScreen, screenData }) {
                 setSelectedPlan(null);
                 setSelectedPort(null);
                 setSelectedPayment(null);
-                await refreshDevice(); // ⬅️ load lại trạng thái ports trước khi tạo đơn mới
+                await refreshDevice();
               }}
             >
               <Text style={styles.btnGhostText}>Tạo đơn khác</Text>
@@ -479,7 +473,6 @@ export default function Extend({ navigateToScreen, screenData }) {
           </View>
         </View>
 
-        {/* Alert dùng chung */}
         <CustomAlert
           visible={showAlert}
           message={alertMsg}
@@ -502,120 +495,97 @@ export default function Extend({ navigateToScreen, screenData }) {
           <Text style={{fontSize: 30, color: '#fff'}}>{'‹'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Tạo đơn hàng</Text>
-        {/* Reload button */}
         <TouchableOpacity onPress={refreshDevice} style={{ padding: 6 }}>
           <Icon name="refresh" size={22} color="#fff" />
         </TouchableOpacity>
       </View>
 
       <View style={{ padding: 16, flex: 1 }}>
-        {/* Device — CHỈ HIỆN NAME */}
+        {/* Device */}
         <View style={styles.deviceBar}>
           <Text style={styles.deviceText} numberOfLines={1} ellipsizeMode="tail">
             {device?.name || 'Thiết bị'}
           </Text>
         </View>
 
-        {/* Selects */}
-        <View style={{ marginTop: 12 }}>
-          <CustomSelect
-            label="Gói dịch vụ"
-            placeholder={planLoading ? 'Đang tải…' : 'Chọn gói dịch vụ'}
-            options={pricingPlans}
-            value={selectedPlan}
-            onChange={setSelectedPlan}
-            getLabel={(it) =>
-              it ? `${it.raw?.name ?? it.name} — ${Number(it.raw?.price ?? it.price).toLocaleString('vi-VN')}đ` : ''
-            }
-            keyExtractor={(it) => String(it?.id)}
-            searchable
-            disabled={planLoading}
-          />
-
-          <CustomSelect
-            label="Cổng sạc"
-            placeholder="Chọn cổng còn trống"
-            options={idlePortOptions}
-            value={selectedPort}
-            onChange={setSelectedPort}
-            getLabel={(it) => (it ? `Cổng ${it.portNumber}` : '')}
-            keyExtractor={(it) => String(it?.id)}
-          />
-
-          <CustomSelect
-            label="Phương thức thanh toán"
-            placeholder="Chọn phương thức"
-            options={['momo', 'vnpay', 'cash'].map(id => paymentMethods.find(p => p.id === id))}
-            value={selectedPayment}
-            onChange={setSelectedPayment}
-            getLabel={(it) => it?.name || ''}
-            keyExtractor={(it) => String(it?.id)}
-            searchable={false}
-            rightIcon="payments"
-            renderValue={(it) => (
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Image source={it.icon} style={{ width: 22, height: 22, borderRadius: 4, marginRight: 8 }} />
-                <Text style={styles.selectText}>{it.name}</Text>
-              </View>
-            )}
-            renderOption={(it, isOn) => (
-              <>
-                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                  <Image source={it.icon} style={{ width: 26, height: 26, borderRadius: 6, marginRight: 10 }} />
-                  <Text style={[styles.optionText, isOn && { color: UI.accent, fontWeight: '700' }]}>{it.name}</Text>
-                </View>
-                {isOn && <Icon name="check" size={18} color={UI.accent} />}
-              </>
-            )}
-          />
-
-          {/* Phone (optional)
-          <View style={{ marginTop: 4 }}>
-            <Text style={styles.label}>Số điện thoại (tuỳ chọn)</Text>
-            <View style={styles.inputWrap}>
-              <Icon name="phone-iphone" size={18} color={UI.sub} />
-              <TextInput
-                style={styles.input}
-                placeholder="Nhập số điện thoại"
-                placeholderTextColor={UI.sub}
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
+        {/* Selects: GRID */}
+        <View style={{ marginTop: 10 }}>
+          <View style={[styles.grid, isDesktop && styles.gridDesktop]}>
+            <View style={styles.col}>
+              <CustomSelect
+                label="Gói dịch vụ"
+                placeholder={planLoading ? 'Đang tải…' : 'Chọn gói dịch vụ'}
+                options={pricingPlans}
+                value={selectedPlan}
+                onChange={setSelectedPlan}
+                getLabel={(it) =>
+                  it ? `${it.raw?.name ?? it.name} — ${Number(it.raw?.price ?? it.price).toLocaleString('vi-VN')}đ` : ''
+                }
+                keyExtractor={(it) => String(it?.id)}
+                searchable
+                disabled={planLoading}
               />
             </View>
-          </View> */}
 
-          <View style={{ marginTop: 14 }}>
+            <View style={styles.col}>
+              <CustomSelect
+                label="Cổng sạc"
+                placeholder="Chọn cổng còn trống"
+                options={idlePortOptions}
+                value={selectedPort}
+                onChange={setSelectedPort}
+                getLabel={(it) => (it ? `Cổng ${it.portNumber}` : '')}
+                keyExtractor={(it) => String(it?.id)}
+              />
+            </View>
+
+            <View style={styles.col}>
+              <CustomSelect
+                label="Phương thức thanh toán"
+                placeholder="Chọn phương thức"
+                options={['momo','vnpay','cash'].map(id => paymentMethods.find(p => p.id === id))}
+                value={selectedPayment}
+                onChange={setSelectedPayment}
+                getLabel={(it) => it?.name || ''}
+                keyExtractor={(it) => String(it?.id)}
+                searchable={false}
+                rightIcon="payments"
+                renderValue={(it) => (
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Image source={it.icon} style={{ width: 20, height: 20, borderRadius: 4, marginRight: 8 }} />
+                    <Text style={styles.selectText}>{it.name}</Text>
+                  </View>
+                )}
+                renderOption={(it, isOn) => (
+                  <>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                      <Image source={it.icon} style={{ width: 22, height: 22, borderRadius: 6, marginRight: 10 }} />
+                      <Text style={[styles.optionText, isOn && { color: UI.accent, fontWeight: '700' }]}>{it.name}</Text>
+                    </View>
+                    {isOn && <Icon name="check" size={18} color={UI.accent} />}
+                  </>
+                )}
+              />
+            </View>
+          </View>
+
+          {/* Button gọn */}
+          <View style={{ marginTop: 4, alignItems: 'center' }}>
             <TouchableOpacity
               style={[
-                styles.btn,
-                { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+                styles.btn, styles.btnNarrow,
                 (!selectedPlan || !selectedPort || !selectedPayment || creating) && { opacity: 0.5 },
               ]}
               disabled={!selectedPlan || !selectedPort || !selectedPayment || creating}
               onPress={handleCreateOrder}
+              activeOpacity={0.9}
             >
-              {creating ? (
-                <>
-                  <ActivityIndicator color="#fff" style={{ marginRight: 8 }} />
-                  <Text style={styles.btnText}>Đang tạo…</Text>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.btnText}>Tạo đơn hàng</Text>
-                </>
-              )}
+              {creating ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Tạo đơn hàng</Text>}
             </TouchableOpacity>
-
-            {/* Nút cập nhật trạng thái cổng thủ công */}
-            {/* <TouchableOpacity style={[styles.btnGhost, { marginTop: 10 }]} onPress={refreshDevice}>
-              <Text style={styles.btnGhostText}>Cập nhật trạng thái cổng</Text>
-            </TouchableOpacity> */}
           </View>
         </View>
       </View>
 
-      {/* Alert dùng chung */}
       <CustomAlert
         visible={showAlert}
         message={alertMsg}
@@ -651,15 +621,16 @@ const styles = StyleSheet.create({
   },
   headerTitle: { textAlign: 'center', color: '#fff', fontSize: 18, fontWeight: '800' },
 
-  label: { fontSize: 13, color: UI.sub, marginBottom: 6 },
+  // compact labels & selects
+  label: { fontSize: 12.5, color: UI.sub, marginBottom: 4 },
   selectBox: {
     borderWidth: 1, borderColor: UI.border, borderRadius: 10,
-    paddingHorizontal: 12, paddingVertical: 10,
+    paddingHorizontal: 10, paddingVertical: 8, // ⬅️ gọn hơn
     backgroundColor: UI.surface, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
-  selectText: { fontSize: 15, color: UI.text },
+  selectText: { fontSize: 14.5, color: UI.text },
 
-  // CENTERED modal
+  // centered modal
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.18)',
@@ -690,13 +661,13 @@ const styles = StyleSheet.create({
   searchWrap: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     borderWidth: 1, borderColor: UI.border, backgroundColor: '#F8FAFC',
-    borderRadius: 10, paddingHorizontal: 10, height: 40, marginBottom: 8
+    borderRadius: 10, paddingHorizontal: 10, height: 38, marginBottom: 8
   },
   searchInput: { flex: 1, color: UI.text },
 
   separator: { height: 1, backgroundColor: UI.border },
   optionItem: {
-    paddingVertical: 12, paddingHorizontal: 10,
+    paddingVertical: 10, paddingHorizontal: 10,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'
   },
   optionText: { fontSize: 15, color: UI.text },
@@ -706,7 +677,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: UI.border,
-    padding: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -716,15 +688,22 @@ const styles = StyleSheet.create({
   inputWrap: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     borderWidth: 1, borderColor: UI.border, backgroundColor: UI.surface,
-    borderRadius: 10, paddingHorizontal: 10, height: 44
+    borderRadius: 10, paddingHorizontal: 10, height: 42
   },
   input: { flex: 1, color: UI.text },
 
+  // GRID compact
+  grid: { gap: 10 },                    // mobile 1 cột
+  gridDesktop: { flexDirection: 'row', flexWrap: 'wrap' },
+  col: { flexBasis: '100%', flexGrow: 1, minWidth: 260 },
+
   btn: {
     backgroundColor: UI.accent,
-    paddingVertical: 12, borderRadius: 12,
+    paddingVertical: 10, borderRadius: 12,
+    paddingHorizontal: 18,
   },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center' },
+  btnNarrow: { minWidth: 240, alignItems: 'center' },
+  btnText: { color: '#fff', fontSize: 15, fontWeight: '800', textAlign: 'center' },
 
   // Success screen
   successWrap: {
