@@ -1,4 +1,4 @@
-// screens/Home/ChargingSession.jsx  (WEB ONLY)
+// screens/Home/ChargingSession.jsx (WEB ONLY, FE paginate when month filter is active)
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   SafeAreaView, View, Text, StyleSheet, TouchableOpacity, FlatList,
@@ -17,7 +17,7 @@ import { saveAs } from 'file-saver';
 
 /* ================= helpers ================= */
 const TAB_BAR_HEIGHT = 72;
-const BOTTOM_PAD = 72 + 36;
+const BOTTOM_PAD = TAB_BAR_HEIGHT + 36;
 
 async function getAccessTokenSafe() {
   const keys = ['access_token', 'accessToken', 'ACCESS_TOKEN', 'token', 'auth_token'];
@@ -63,26 +63,18 @@ function monthKey(dt) {
   const mm = String(d.getMonth() + 1).padStart(2, '0');
   return `${yyyy}-${mm}`; // 2025-10
 }
-// dùng dấu gạch để Excel KHÔNG tự convert thành kiểu date
 function monthLabelDash(key) {
   if (!key || key === 'all') return 'all';
   const [y, m] = key.split('-');
-  return `${m}-${y}`; // 10-2025
+  return `${m}-${y}`; // 10-2025 (để Excel không auto-format)
 }
-// hiển thị UI
 function monthLabelSlash(key) {
   if (!key || key === 'all') return 'Tất cả (trang hiện tại)';
   const [y, m] = key.split('-');
   return `${m}/${y}`;
 }
 
-function diffDays(fromISO) {
-  if (!fromISO) return Number.POSITIVE_INFINITY;
-  const from = new Date(fromISO).getTime();
-  return Math.floor((Date.now() - from) / (24 * 60 * 60 * 1000));
-}
-
-/* ===================== MonthDropdown (web popover, clean) ===================== */
+/* ===================== MonthDropdown ===================== */
 function MonthDropdown({ options, value, onChange }) {
   const [open, setOpen] = useState(false);
   const toggle = useCallback(() => setOpen(v => !v), []);
@@ -90,11 +82,8 @@ function MonthDropdown({ options, value, onChange }) {
 
   return (
     <View style={styles.ddWrapWeb}>
-       
-
       <TouchableOpacity style={styles.ddButton} onPress={toggle} activeOpacity={0.9}>
         <Text style={styles.ddButtonText}>{monthLabelSlash(value)}</Text>
-        
       </TouchableOpacity>
 
       {open && (
@@ -134,7 +123,7 @@ function MonthDropdown({ options, value, onChange }) {
 
 /* ===================== Screen ===================== */
 export default function ChargingSession({ navigateToScreen }) {
-  // back handlers (web giữ gesture trái)
+  // back handlers
   const goBack = useCallback(() => {
     if (navigateToScreen) navigateToScreen('Device');
     return true;
@@ -158,168 +147,220 @@ export default function ChargingSession({ navigateToScreen }) {
     [goBack]
   );
 
-  // pagination + data
+  /* ====== states ====== */
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
 
-  const [items, setItems] = useState([]);
+  const [items, setItems] = useState([]);        // danh sách hiển thị (đã cắt trang, tuỳ mode)
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // search + filter
-  const [search, setSearch] = useState(''); // chỉ search theo mã đơn
-  const [status, setStatus] = useState('all'); // reserved
-  const [range, setRange] = useState('all');   // reserved
-
-  // month filter
-  const [monthOptions, setMonthOptions] = useState([]); // ['2025-09', ...] từ trang hiện tại
+  const [search, setSearch] = useState('');  // mã đơn
   const [selectedMonth, setSelectedMonth] = useState('all');
-  const [monthTotalKWh, setMonthTotalKWh] = useState(0);
-  const [monthLoading, setMonthLoading] = useState(false);
 
-  // fetch 1 trang
-  const fetchPage = useCallback(async (p = 1) => {
+  // cache toàn bộ dữ liệu để FE filter khi chọn tháng
+  const [allSessions, setAllSessions] = useState([]);      // dữ liệu ALL (load 1 lần, không params)
+  const [allReady, setAllReady] = useState(false);         // cờ đã có all
+  const [monthOptions, setMonthOptions] = useState([]);    // extract từ allSessions
+
+  /* ====== boot: fetch ALL (no params) để dùng cho filter theo tháng ====== */
+ // Gom toàn bộ sessions (loop qua tất cả trang) để dùng cho filter theo tháng
+const fetchAllOnce = useCallback(async () => {
+  try {
+    const token = await getAccessTokenSafe();
+
+    // dùng limit lớn để giảm số lần gọi
+    const HARD_LIMIT = 20000;
+    let p = 1, tp = 1;
+    const all = [];
+
+    do {
+      const res = await getSessions(token, { page: p, limit: HARD_LIMIT });
+      const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+      all.push(...list);
+
+      // tính tổng trang từ response hiện có
+      const lim = Number(res?.limit ?? res?.per_page ?? HARD_LIMIT) || HARD_LIMIT;
+      const totalItems = Number(res?.total ?? 0);
+      tp = res?.totalPages ?? res?.total_pages
+        ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
+
+      p += 1;
+    } while (p <= tp);
+
+    setAllSessions(all);
+
+    const keys = new Set();
+    for (const it of all) {
+      const mk = monthKey(it?.startTime || it?.endTime);
+      if (mk) keys.add(mk);
+    }
+    const arr = Array.from(keys).sort((a, b) => (a > b ? -1 : 1));
+    setMonthOptions(arr);
+    setAllReady(true);
+  } catch (e) {
+    console.warn('Lỗi load ALL sessions:', e?.message || e);
+    setAllSessions([]);
+    setMonthOptions([]);
+    setAllReady(true);
+  }
+}, []);
+
+
+  /* ====== backend paginate khi Tháng = Tất cả ====== */
+  const fetchBackendPage = useCallback(async (p = 1, q = '') => {
     setLoading(true);
     try {
       const token = await getAccessTokenSafe();
       const params = { page: p, limit };
-      if (search.trim()) params.search = search.trim();
+      if (q.trim()) params.search = q.trim();
       const res = await getSessions(token, params);
 
       const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
       setItems(list);
 
-      // total pages fallback
+      // backend total pages fallback
       const lim = Number(res?.limit ?? res?.per_page ?? limit) || limit;
       const totalItems = Number(res?.total ?? 0);
       const tp = res?.totalPages ?? res?.total_pages
         ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
       setTotalPages(Math.max(1, Number(tp)));
       setPage(res?.page || p);
-
-      // build month options từ TRANG HIỆN TẠI
-      const keys = new Set();
-      for (const it of list) {
-        const mk = monthKey(it?.startTime || it?.endTime);
-        if (mk) keys.add(mk);
-      }
-      const arr = Array.from(keys).sort((a, b) => (a > b ? -1 : 1));
-      setMonthOptions(arr);
-      if (selectedMonth !== 'all' && !arr.includes(selectedMonth)) {
-        setSelectedMonth('all');
-      }
     } catch (e) {
-      console.warn('Lỗi lấy phiên sạc:', e?.message || e);
+      console.warn('Lỗi lấy trang backend:', e?.message || e);
       setItems([]);
       setTotalPages(1);
-      setMonthOptions([]);
+      setPage(1);
     } finally {
       setLoading(false);
     }
-  }, [limit, search, selectedMonth]);
+  }, [limit]);
 
-  useEffect(() => { fetchPage(1); }, [fetchPage]);
+  /* ====== FE filter + paginate khi chọn Tháng ====== */
+  const applyFEFilterPaginate = useCallback((targetMonth, q, p = 1) => {
+  let base = allSessions;
+  if (targetMonth !== 'all') {
+    base = base.filter(it => monthKey(it?.startTime || it?.endTime) === targetMonth);
+  }
+  if (q.trim()) {
+    const needle = q.trim().toLowerCase();
+    base = base.filter(it => String(it?.order_id || '').toLowerCase().includes(needle));
+  }
+  const tp = Math.max(1, Math.ceil(base.length / limit));
+  const safePage = Math.min(Math.max(1, p), tp);
+  const start = (safePage - 1) * limit;
+  setItems(base.slice(start, start + limit));
+  setTotalPages(tp);
+  setPage(safePage);
+  setLoading(false);
+}, [allSessions, limit]);
 
+
+  /* ====== orchestrate theo selectedMonth ====== */
+  // load ALL ngay từ đầu (1 lần)
+ 
+
+  // khi vào trang lần đầu: nếu đang TẤT CẢ → gọi backend paginate trang 1
+  useEffect(() => {
+    if (selectedMonth === 'all') {
+      fetchBackendPage(1, search);
+    } else {
+      // khi chuyển sang filter theo tháng → dùng FE paginate
+      setLoading(true);
+      applyFEFilterPaginate(selectedMonth, search, 1);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMonth]);
+
+
+   useEffect(() => { fetchAllOnce(); }, []);
+
+  // thao tác search
+  const doSearch = useCallback(() => {
+    setLoading(true);
+    if (selectedMonth === 'all') {
+      fetchBackendPage(1, search);
+    } else {
+      applyFEFilterPaginate(selectedMonth, search, 1);
+    }
+  }, [selectedMonth, search, fetchBackendPage, applyFEFilterPaginate]);
+
+  // pull-to-refresh
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    try { await fetchPage(page); } finally { setRefreshing(false); }
-  }, [fetchPage, page]);
+    try {
+      // refresh cả 2 nguồn
+      await fetchAllOnce();
+      if (selectedMonth === 'all') {
+        await fetchBackendPage(page, search);
+      } else {
+        applyFEFilterPaginate(selectedMonth, search, page);
+      }
+    } finally { setRefreshing(false); }
+  }, [fetchAllOnce, fetchBackendPage, applyFEFilterPaginate, selectedMonth, page, search]);
 
+  // prev/next
   const handlePrev = useCallback(() => {
     const next = Math.max(1, page - 1);
-    if (next !== page) fetchPage(next);
-  }, [page, fetchPage]);
+    if (next === page) return;
+    setLoading(true);
+    if (selectedMonth === 'all') {
+      fetchBackendPage(next, search);
+    } else {
+      applyFEFilterPaginate(selectedMonth, search, next);
+    }
+  }, [page, selectedMonth, search, fetchBackendPage, applyFEFilterPaginate]);
 
   const handleNext = useCallback(() => {
     const next = Math.min(totalPages, page + 1);
-    if (next !== page) fetchPage(next);
-  }, [page, totalPages, fetchPage]);
-
-  // tính tổng kWh toàn tháng (qua mọi trang)
-  const recomputeMonthTotal = useCallback(async (targetMonth) => {
-    if (targetMonth === 'all') {
-      setMonthTotalKWh(0);
-      return;
+    if (next === page) return;
+    setLoading(true);
+    if (selectedMonth === 'all') {
+      fetchBackendPage(next, search);
+    } else {
+      applyFEFilterPaginate(selectedMonth, search, next);
     }
-    try {
-      setMonthLoading(true);
-      const token = await getAccessTokenSafe();
+  }, [page, totalPages, selectedMonth, search, fetchBackendPage, applyFEFilterPaginate]);
 
-      let p = 1;
-      let tp = 1;
-      let totalKWh = 0;
-
-      do {
-        const params = { page: p, limit };
-        if (search.trim()) params.search = search.trim();
-        const res = await getSessions(token, params);
-
-        const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
-        for (const it of list) {
-          const mk = monthKey(it?.startTime || it?.endTime);
-          if (mk === targetMonth) {
-            const kwh = Number(it?.energy_used_kwh ?? it?.energy_kwh ?? it?.energy ?? 0);
-            if (Number.isFinite(kwh)) totalKWh += kwh;
-          }
-        }
-
-        const lim = Number(res?.limit ?? res?.per_page ?? limit) || limit;
-        const totalItems = Number(res?.total ?? 0);
-        tp = res?.totalPages ?? res?.total_pages
-          ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
-        p += 1;
-      } while (p <= tp);
-
-      setMonthTotalKWh(totalKWh);
-    } catch (e) {
-      console.warn('Lỗi tính tổng tháng:', e?.message || e);
-      setMonthTotalKWh(0);
-    } finally {
-      setMonthLoading(false);
+  /* ====== tổng kWh tháng (từ allSessions, không gọi backend) ====== */
+  const monthTotalKWh = useMemo(() => {
+    if (selectedMonth === 'all') return 0;
+    let total = 0;
+    for (const it of allSessions) {
+      if (monthKey(it?.startTime || it?.endTime) === selectedMonth) {
+        const kwh = Number(it?.energy_used_kwh ?? it?.energy_kwh ?? it?.energy ?? 0);
+        if (Number.isFinite(kwh)) total += kwh;
+      }
     }
-  }, [limit, search]);
-
-  useEffect(() => { recomputeMonthTotal(selectedMonth); }, [selectedMonth, recomputeMonthTotal]);
-
-  // filter UI theo tháng (trên trang hiện tại)
-  const filtered = useMemo(() => {
-    return (items || []).filter((it) => {
-      const mk = monthKey(it?.startTime || it?.endTime);
-      const matchMonth = selectedMonth === 'all' || mk === selectedMonth;
-
-      const st = String(it?.status || '').toLowerCase();
-      const matchStatus = status === 'all' || st === status;
-
-      let matchRange = true;
-      if (range === '7d') matchRange = diffDays(it?.startTime || it?.endTime) <= 7;
-      if (range === '30d') matchRange = diffDays(it?.startTime || it?.endTime) <= 30;
-
-      return matchMonth && matchStatus && matchRange;
-    });
-  }, [items, status, range, selectedMonth]);
+    return total;
+  }, [selectedMonth, allSessions]);
 
   /* ========== Export Excel (đa sheet + tổng) ========== */
-  const fetchAllPages = useCallback(async () => {
-    const token = await getAccessTokenSafe();
-    let p = 1;
-    let tp = 1;
-    const all = [];
-    do {
-      const params = { page: p, limit };
-      if (search.trim()) params.search = search.trim();
-      const res = await getSessions(token, params);
+  const ensureAllData = useCallback(async () => {
+    if (allReady) return allSessions;
+    try {
+      const token = await getAccessTokenSafe();
+      const res = await getSessions(token); // không params
       const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
-      all.push(...list);
-
-      const lim = Number(res?.limit ?? res?.per_page ?? limit) || limit;
-      const totalItems = Number(res?.total ?? 0);
-      tp = res?.totalPages ?? res?.total_pages
-        ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
-      p += 1;
-    } while (p <= tp);
-    return all;
-  }, [limit, search]);
+      return list;
+    } catch {
+      // fallback: lặp trang nếu server không trả all
+      const token = await getAccessTokenSafe();
+      let p = 1, tp = 1;
+      const out = [];
+      do {
+        const res = await getSessions(token, { page: p, limit: 100 });
+        const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+        out.push(...list);
+        const lim = Number(res?.limit ?? 100) || 100;
+        const totalItems = Number(res?.total ?? 0);
+        tp = res?.totalPages ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
+        p++;
+      } while (p <= tp);
+      return out;
+    }
+  }, [allReady, allSessions]);
 
   const toRow = (it) => ({
     'Mã đơn': String(it?.order_id ?? ''),
@@ -331,57 +372,44 @@ export default function ChargingSession({ navigateToScreen }) {
     'Năng lượng (kWh)': Number(it?.energy_used_kwh ?? it?.energy_kwh ?? it?.energy ?? 0),
     'Tháng': monthLabelDash(monthKey(it?.startTime || it?.endTime)),
   });
-
   const autoCols = (headers) => headers.map(w => ({ wch: w }));
 
   const exportExcel = useCallback(async () => {
     try {
-      const data = await fetchAllPages();
+      const data = await ensureAllData();
 
       // nhóm theo tháng + tổng
-      const monthMap = new Map(); // key -> rows[]
-      const monthTotals = new Map(); // key -> number
+      const monthMap = new Map();
+      const monthTotals = new Map();
       for (const it of data) {
         const key = monthKey(it?.startTime || it?.endTime);
         if (!key) continue;
         const row = toRow(it);
         if (!monthMap.has(key)) monthMap.set(key, []);
         monthMap.get(key).push(row);
-
         const kwh = Number(row['Năng lượng (kWh)'] || 0);
         monthTotals.set(key, (monthTotals.get(key) || 0) + (Number.isFinite(kwh) ? kwh : 0));
       }
 
-      // Workbook
       const wb = XLSX.utils.book_new();
 
-      // ===== Sheet "Tong": bảng tổng theo tháng + chi tiết toàn bộ =====
-      // 1) bảng tổng theo tháng
+      // Sheet "Tong"
       const sums = Array.from(monthTotals.entries())
         .sort((a, b) => (a[0] > b[0] ? -1 : 1))
         .map(([k, v]) => ({ 'Tháng': monthLabelDash(k), 'Tổng kWh': Number(v.toFixed(3)) }));
-
       const wsSum = XLSX.utils.json_to_sheet(sums.length ? sums : [{ 'Tháng': '-', 'Tổng kWh': 0 }]);
-      // set width
       wsSum['!cols'] = autoCols([12, 14]);
 
-      // 2) bảng chi tiết
       const totalRows = data.map(toRow);
       const wsDetail = XLSX.utils.json_to_sheet(totalRows);
       wsDetail['!cols'] = autoCols([14, 22, 8, 12, 19, 19, 16, 10]);
 
-      // merge vào một sheet "Tong": đầu tiên là Summary, cách 2 hàng, rồi tới Detail
-      // lấy range của wsSum
       const sumRange = XLSX.utils.decode_range(wsSum['!ref'] || 'A1:A1');
       const sumRows = (sumRange.e.r - sumRange.s.r + 1) || 1;
-
-      // build a new sheet by writing wsSum content then append empty row then append wsDetail starting at row sumRows+3
       const wsTong = {};
-      // copy wsSum cells
-      Object.keys(wsSum).forEach((addr) => { if (addr[0] !== '!') wsTong[addr] = wsSum[addr]; });
-      // title row
       wsTong['A1'] = { t: 's', v: 'Tổng kWh theo tháng' };
-      // shift wsSum down by 1 row
+
+      // shift wsSum xuống 1 hàng
       const shifted = {};
       Object.keys(wsSum).forEach((addr) => {
         if (addr[0] === '!') return;
@@ -391,60 +419,48 @@ export default function ChargingSession({ navigateToScreen }) {
       });
       Object.keys(shifted).forEach((a) => { wsTong[a] = shifted[a]; });
 
-      // write Detail header at startRow
-      const startRow = sumRows + 3; // one title row + summary rows + one blank row
+      const startRow = sumRows + 3;
       const detailAOA = XLSX.utils.sheet_to_json(wsDetail, { header: 1 });
       XLSX.utils.sheet_add_aoa(wsTong, [['Chi tiết toàn bộ']], { origin: `A${startRow}` });
       XLSX.utils.sheet_add_aoa(wsTong, detailAOA, { origin: `A${startRow + 1}` });
 
-      // ref + cols
       const lastRow = startRow + detailAOA.length;
       const lastCol = Math.max(
         XLSX.utils.decode_range(wsDetail['!ref'] || 'A1:A1').e.c,
         XLSX.utils.decode_range(wsSum['!ref'] || 'A1:A1').e.c,
       );
-      wsTong['!ref'] = XLSX.utils.encode_range(
-        { r: 0, c: 0 },
-        { r: lastRow, c: lastCol },
-      );
+      wsTong['!ref'] = XLSX.utils.encode_range({ r: 0, c: 0 }, { r: lastRow, c: lastCol });
       wsTong['!cols'] = autoCols([22, 14, 8, 12, 19, 19, 16, 12]);
-
       XLSX.utils.book_append_sheet(wb, wsTong, 'Tong');
 
-      // ===== Sheet mỗi tháng: hàng 1 là tổng kWh, sau đó là bảng chi tiết tháng =====
+      // Sheets theo tháng
       const sortedKeys = Array.from(monthMap.keys()).sort((a, b) => (a > b ? -1 : 1));
       for (const key of sortedKeys) {
         const rows = monthMap.get(key);
         const label = monthLabelDash(key);
         const total = Number((monthTotals.get(key) || 0).toFixed(3));
 
-        const ws = XLSX.utils.json_to_sheet(rows);
-        // chèn tiêu đề tổng lên trên: 2 cột
-        XLSX.utils.sheet_add_aoa(ws, [[`Tổng kWh tháng ${label}`, total]], { origin: 'A1' });
-        // đẩy bảng json xuống sau 2 dòng (tiêu đề + trống)
-        const detailAOA2 = XLSX.utils.sheet_to_json(ws, { header: 1 }); // includes our A1 already
-        // regenerate: put title row, blank row, then headers+rows
+        const base = XLSX.utils.json_to_sheet(rows);
         const content = [
           [`Tổng kWh tháng ${label}`, total],
           [''],
-          ...XLSX.utils.sheet_to_json(XLSX.utils.json_to_sheet(rows), { header: 1 }),
+          ...XLSX.utils.sheet_to_json(base, { header: 1 }),
         ];
         const wsFinal = XLSX.utils.aoa_to_sheet(content);
         wsFinal['!cols'] = autoCols([28, 16, 8, 14, 20, 20, 18, 10]);
         XLSX.utils.book_append_sheet(wb, wsFinal, label);
       }
 
-      // download
       const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
       const blob = new Blob([wbout], { type: 'application/octet-stream' });
       const now = new Date();
-      const fname = `charging_sessions_${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}.xlsx`;
+      const fname = `Bao_cao_phien_sac_${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}.xlsx`;
       saveAs(blob, fname);
     } catch (e) {
       console.warn('Export error:', e);
       alert('Xuất Excel thất bại: ' + (e?.message || e));
     }
-  }, [fetchAllPages]);
+  }, [ensureAllData]);
 
   /* ================= RENDER ================= */
   const renderItem = ({ item }) => {
@@ -490,13 +506,9 @@ export default function ChargingSession({ navigateToScreen }) {
       <View style={styles.totalCard}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent:'space-between' }}>
           <Text style={styles.totalTitle}>Tổng tháng {monthLabelSlash(selectedMonth)}</Text>
-          {monthLoading ? (
-            <ActivityIndicator size="small" color="#2563EB" />
-          ) : (
-            <Text style={styles.totalValue}>{Number(monthTotalKWh || 0).toFixed(2)} kWh</Text>
-          )}
+          <Text style={styles.totalValue}>{Number(monthTotalKWh || 0).toFixed(2)} kWh</Text>
         </View>
-        <Text style={styles.totalHint}>(Tính trên toàn bộ dữ liệu của tháng qua tất cả các trang)</Text>
+        <Text style={styles.totalHint}>(Tính từ toàn bộ dữ liệu đã tải, không phụ thuộc trang)</Text>
       </View>
     );
   };
@@ -512,24 +524,24 @@ export default function ChargingSession({ navigateToScreen }) {
         <View style={{ width: 24 }} />
       </View>
 
-      {/* Search + Dropdown + Export */}
-      <View style={[styles.filterBar, { gap: 10 }]}>
-        <View style={{ flex: 1 }}>
-          <SearchBar
-            placeholder="Nhập mã đơn để tìm kiếm"
-            value={search}
-            onChange={(txt) => { setSearch(txt); setPage(1); }}
-            onClear={() => { setSearch(''); fetchPage(1); }}
-            onSubmit={() => fetchPage(1)}
-          />
-        </View>
+      {/* Hàng 1: Search */}
+      <View style={styles.searchWrap}>
+        <SearchBar
+          placeholder="Nhập mã đơn để tìm kiếm"
+          value={search}
+          onChange={(txt) => { setSearch(txt); }}
+          onClear={() => { setSearch(''); doSearch(); }}
+          onSubmit={doSearch}
+        />
+      </View>
 
+      {/* Hàng 2: Dropdown + Export */}
+      <View style={styles.actionRow}>
         <MonthDropdown
           options={monthOptions}
           value={selectedMonth}
           onChange={(k) => { setSelectedMonth(k); setPage(1); }}
         />
-
         <TouchableOpacity onPress={exportExcel} style={styles.exportBtn} activeOpacity={0.9}>
           <Icon name="download" size={16} color="#fff" />
           <Text style={styles.exportText}>Xuất Excel</Text>
@@ -549,7 +561,7 @@ export default function ChargingSession({ navigateToScreen }) {
         </View>
       ) : (
         <FlatList
-          data={filtered}
+          data={items}
           keyExtractor={(it, idx) => String(it?._id || it?.order_id || idx)}
           renderItem={renderItem}
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
@@ -580,6 +592,7 @@ export default function ChargingSession({ navigateToScreen }) {
 /* ================= styles ================= */
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F6F7FB' },
+
   header: {
     backgroundColor: '#4A90E2',
     paddingHorizontal: 16,
@@ -591,20 +604,29 @@ const styles = StyleSheet.create({
   backButton: { padding: 6, marginRight: 6 },
   headerTitle: { flex: 1, color: '#fff', fontSize: 18, fontWeight: '700' },
 
-  filterBar: {
+  // hàng search (riêng)
+  searchWrap: {
     paddingHorizontal: 16,
     paddingTop: 12,
+    paddingBottom: 4,
+    zIndex: 20,
+  },
+
+  // hàng dropdown + export
+  actionRow: {
+    paddingHorizontal: 16,
+    paddingTop: 6,
     paddingBottom: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    overflow: 'visible',
-    zIndex: 20,
+    gap: 10,
+    zIndex: 19,
   },
+
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
   // dropdown (clean)
-  ddWrapWeb: { position: 'relative', zIndex: 99, minWidth: 200 },
-  ddLabel: { fontSize: 11, color: '#6B7280', marginBottom: 6, fontWeight: '700', textAlign: 'center' },
+  ddWrapWeb: { position: 'relative', zIndex: 99, minWidth: 220, flex: 1, maxWidth: 360 },
   ddButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -614,10 +636,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     backgroundColor: '#fff',
-    minWidth: 200,
     justifyContent: 'space-between',
   },
-  ddButtonText: { color: '#2563EB', fontWeight: '800', flex: 1, marginRight: 6, textAlign: 'center' },
+  ddButtonText: { color: '#2563EB', fontWeight: '800', flex: 1, marginRight: 6, textAlign: 'left' },
 
   popoverBackdrop: {
     position: 'fixed',
@@ -626,8 +647,9 @@ const styles = StyleSheet.create({
   },
   popoverPanel: {
     position: 'absolute',
-    top: 58,
-    right: 0,
+    top: 50,
+    left: 0,
+    right: 'auto',
     width: 280,
     backgroundColor: '#fff',
     borderRadius: 14,
