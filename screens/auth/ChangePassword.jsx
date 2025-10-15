@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, BackHandler } from 'react-native';
 import SimpleHeader from '../../components/headers/SimpleHeader';
 import PasswordField from '../../components/form/PasswordField';
 import useLanguage from '../../Hooks/useLanguage';
@@ -20,11 +20,10 @@ export default function ChangePassword({ navigateToScreen, navigation }) {
     return true;
   }, [navigateToScreen]);
 
- 
   const { form, show, focus, loading, onChange, toggle, setFoc, submit } =
     useChangePassword({ t, onSuccess: goBackInfo });
 
- 
+  // ✅ Block back trong React Navigation (giữ nguyên)
   useEffect(() => {
     const sub = navigation?.addListener?.('beforeRemove', (e) => {
       e.preventDefault();
@@ -32,6 +31,37 @@ export default function ChangePassword({ navigateToScreen, navigation }) {
     });
     return sub;
   }, [navigation, goBackInfo]);
+
+  // ✅ Hardware Back Android
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', goBackInfo);
+    return () => sub.remove();
+  }, [goBackInfo]);
+
+  // ✅ Chặn nút Back của browser (Web) – same logic như ChangeInfo
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+
+    // Đưa URL về root (tuỳ app, m muốn để path nào thì sửa ở đây)
+    const TARGET_PATH = '/';
+    // Ghim URL hiện tại
+    window.history.replaceState(null, '', TARGET_PATH);
+
+    const handlePopState = () => {
+      // Giữ URL không đổi
+      window.history.replaceState(null, '', TARGET_PATH);
+      // Điều hướng về màn Information thay vì rời trang
+      goBackInfo();
+    };
+
+    // Push một state để bắt được sự kiện back
+    window.history.pushState(null, '', TARGET_PATH);
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [goBackInfo]);
 
   return (
     <View style={styles.container}>

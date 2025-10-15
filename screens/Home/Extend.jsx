@@ -119,26 +119,6 @@ const CustomSelect = ({
                 </TouchableOpacity>
               </View>
 
-              {/* {searchable && (
-                <View style={styles.searchWrap}>
-                  <Icon name="search" size={18} color={UI.sub} />
-                  <TextInput
-                    style={styles.searchInput}
-                    placeholder="Tìm nhanh…"
-                    placeholderTextColor={UI.sub}
-                    value={q}
-                    onChangeText={setQ}
-                    autoFocus
-                    returnKeyType="search"
-                  />
-                  {q ? (
-                    <TouchableOpacity onPress={() => setQ('')}>
-                      <Icon name="cancel" size={18} color={UI.sub} />
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              )} */}
-
               <FlatList
                 data={filtered}
                 keyExtractor={keyExtractor}
@@ -239,6 +219,30 @@ export default function Extend({ navigateToScreen, screenData }) {
     };
     const sub = BackHandler.addEventListener('hardwareBackPress', onHWBack);
     return () => sub.remove();
+  }, [goBack]);
+
+  // ✅ WEB: chặn nút Back của trình duyệt -> quay về Device
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+
+    // Tuỳ app của m: giữ nguyên root hoặc route hiện tại
+    const TARGET_PATH = '/';
+    // Ghim URL hiện tại về TARGET_PATH để khi back không rời app
+    window.history.replaceState(null, '', TARGET_PATH);
+
+    const handlePopState = () => {
+      // giữ URL cố định & điều hướng nội bộ
+      window.history.replaceState(null, '', TARGET_PATH);
+      goBack();
+    };
+
+    // đẩy thêm một state để bắt popstate
+    window.history.pushState(null, '', TARGET_PATH);
+    window.addEventListener('popstate', handlePopState);
+
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
   }, [goBack]);
 
   // iOS: edge swipe từ mép trái để back
@@ -625,7 +629,7 @@ const styles = StyleSheet.create({
   label: { fontSize: 12.5, color: UI.sub, marginBottom: 4 },
   selectBox: {
     borderWidth: 1, borderColor: UI.border, borderRadius: 10,
-    paddingHorizontal: 10, paddingVertical: 8, // ⬅️ gọn hơn
+    paddingHorizontal: 10, paddingVertical: 8,
     backgroundColor: UI.surface, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
   },
   selectText: { fontSize: 14.5, color: UI.text },
@@ -693,7 +697,7 @@ const styles = StyleSheet.create({
   input: { flex: 1, color: UI.text },
 
   // GRID compact
-  grid: { gap: 10 },                    // mobile 1 cột
+  grid: { gap: 10 },
   gridDesktop: { flexDirection: 'row', flexWrap: 'wrap' },
   col: { flexBasis: '100%', flexGrow: 1, minWidth: 260 },
 

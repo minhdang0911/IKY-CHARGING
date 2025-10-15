@@ -308,14 +308,22 @@ function applyLiveToUI(ui) {
 }
 
 /* ===================== SCREEN ===================== */
-export default function MonitoringScreen() {
+export default function MonitoringScreen({ setBottomHidden }) {
   const { t, lang } = useI18n();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const openDrawer = useCallback(() => setDrawerOpen(true), []);
-  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+ const openDrawer = useCallback(() => {
+  setDrawerOpen(true);
+  try { setBottomHidden?.(true); } catch {}
+}, [setBottomHidden]);
 
-  const [devicesMenu, setDevicesMenu] = useState([]);
+const closeDrawer = useCallback(() => {
+  setDrawerOpen(false);
+  try { setBottomHidden?.(showModal); } catch {} // còn modal thì vẫn ẩn
+}, [setBottomHidden, showModal]);
+
+
+  const [devicesMenu, setDevicesMenu] = useState([]); 
   const [selectedId, setSelectedId] = useState(null);
   const [selectedDevice, setSelectedDevice] = useState(null);
 
@@ -516,25 +524,31 @@ export default function MonitoringScreen() {
     );
   }
 
-  function ModalContent({ t, headerName, modalPort, buildCheckoutUrl, openLink, saveQrPng, qrRef }) {
+ function ModalContent({ t, headerName, modalPort, buildCheckoutUrl, openLink, saveQrPng, qrRef, onRequestClose }) {
     return (
       <>
         {/* Header cố định */}
-        <View style={styles.modalHeader}>
-          <View style={styles.modalHeaderLeft}>
-            <View style={styles.modalIconBadge}>
-              <Icon name="bolt" size={20} color="#fff" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.modalTitle}>{t('portDetail')}</Text>
-              {!!modalPort && (
-                <Text style={styles.modalSubtitle}>
-                  {headerName} • {t('port')} {modalPort?.name} • {t(modalPort?.portTextStatus)}
-                </Text>
-              )}
-            </View>
-          </View>
-        </View>
+       <View style={styles.modalHeader}>
+  <View style={styles.modalHeaderLeft}>
+    <View style={styles.modalIconBadge}>
+      <Icon name="bolt" size={20} color="#fff" />
+    </View>
+    <View style={{ flex: 1 }}>
+      <Text style={styles.modalTitle}>{t('portDetail')}</Text>
+      {!!modalPort && (
+        <Text style={styles.modalSubtitle}>
+          {headerName} • {t('port')} {modalPort?.name} • {t(modalPort?.portTextStatus)}
+        </Text>
+      )}
+    </View>
+  </View>
+
+  {/* 👇 Nút X để đóng modal */}
+  <TouchableOpacity onPress={onRequestClose} style={styles.modalCloseBtn}>
+    <Icon name="close" size={22} color="#6B7280" />
+  </TouchableOpacity>
+</View>
+
 
         {/* Phần có thể kéo */}
         <ScrollView
@@ -605,18 +619,34 @@ export default function MonitoringScreen() {
     );
   }
 
-  const handleOpenPortModal = useCallback((port) => {
-    setModalPort(port || null);
-    setShowModal(Boolean(port));
-  }, []);
-  const handleClosePortModal = useCallback(() => {
-    setShowModal(false);
-  }, []);
+ const handleOpenPortModal = useCallback((port) => {
+   setModalPort(port || null);
+   setShowModal(Boolean(port));
+   try { setBottomHidden?.(true); } catch {}
+ }, [setBottomHidden]);
+ 
 
-  const ModalLike = Platform.OS === 'web' ? WebModal : Modal;
+
+ const handleClosePortModal = useCallback(() => {
+  setShowModal(false);
+  try { setBottomHidden?.(false); } catch {} }, [setBottomHidden]);
+ const ModalLike = Platform.OS === 'web' ? WebModal : Modal;
   const modalProps = Platform.OS === 'web'
     ? { visible: showModal, onRequestClose: handleClosePortModal }
     : { visible: showModal, transparent: true, animationType: 'fade', onRequestClose: handleClosePortModal };
+
+
+   useEffect(() => {
+  return () => {
+    try { setBottomHidden?.(false); } catch {}
+   };
+ }, [setBottomHidden]);
+
+
+ // Ẩn/hiện navBottom theo Drawer hoặc Modal
+useEffect(() => {
+  try { setBottomHidden?.(drawerOpen || showModal); } catch {}
+}, [drawerOpen, showModal, setBottomHidden]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -979,9 +1009,25 @@ export default function MonitoringScreen() {
       <View style={{zIndex:1000}}>
         <EdgeDrawer visible={drawerOpen} onClose={closeDrawer} topOffset={0}>
           <View style={styles.drawerHeader}>
-            <View className="drawerBadge" style={styles.drawerBadge}><Icon name="ev-station" size={16} color="#fff" /></View>
-            <Text style={styles.drawerTitle}>{t('devices')}</Text>
-          </View>
+  <View style={styles.drawerHeaderLeft}>
+    <View style={styles.drawerBadge}>
+      <Icon name="ev-station" size={16} color="#fff" />
+    </View>
+    <Text style={styles.drawerTitle}>{t('devices')}</Text>
+  </View>
+
+  {/* nút X close */}
+  <TouchableOpacity
+    onPress={closeDrawer}
+    accessibilityLabel={t('close')}
+    hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+    style={styles.drawerCloseBtn}
+    activeOpacity={0.8}
+  >
+    <Icon name="close" size={18} color="#6B7280" />
+  </TouchableOpacity>
+</View>
+
           <View style={{ height: 8 }} />
           <FlatList
             data={devicesMenu}
@@ -1081,6 +1127,7 @@ export default function MonitoringScreen() {
             openLink={openLink}
             saveQrPng={saveQrPng}
             qrRef={qrRef}
+            onRequestClose={handleClosePortModal}
           />
         ) : (
           <Pressable style={styles.modalOverlay} onPress={handleClosePortModal}>
@@ -1093,6 +1140,7 @@ export default function MonitoringScreen() {
                 openLink={openLink}
                 saveQrPng={saveQrPng}
                 qrRef={qrRef}
+                onRequestClose={handleClosePortModal}
               />
             </View>
           </Pressable>
@@ -1189,9 +1237,46 @@ const styles = StyleSheet.create({
   deviceMenuName: { fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 2 },
   deviceMenuPorts: { fontSize: 12, color: '#6B7280' },
 
-  drawerHeader: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8, flexDirection: 'row', alignItems: 'center' },
-  drawerBadge: { width: 28, height: 28, borderRadius: 8, backgroundColor:'#4A90E2', alignItems:'center', justifyContent:'center', marginRight: 8 },
+  drawerHeader: {
+  paddingHorizontal: 16,
+  paddingTop: 14,
+  paddingBottom: 8,
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between', // 👈 để canh X bên phải
+},
+
+drawerHeaderLeft: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  flexShrink: 1,
+  gap: 8,
+},
+  drawerBadge: {
+  width: 28,
+  height: 28,
+  borderRadius: 8,
+  backgroundColor: '#4A90E2',
+  alignItems: 'center',
+  justifyContent: 'center',
+  marginRight: 4,
+},
   drawerTitle: { fontSize: 16, fontWeight: '800', color: '#111827' },
+
+  drawerCloseBtn: {
+  width: 32,
+  height: 32,
+  borderRadius: 16,
+  backgroundColor: '#F3F4F6',
+  alignItems: 'center',
+  justifyContent: 'center',
+  // nhẹ nhàng một tí bóng:
+  shadowColor: '#000',
+  shadowOpacity: 0.06,
+  shadowRadius: 6,
+  shadowOffset: { width: 0, height: 2 },
+  elevation: 2,
+},
 
   deviceHeader: { fontSize: 18, fontWeight: '800', color: '#111827' },
   deviceSub: { fontSize: 12, color: '#6B7280', marginTop: 2, marginBottom: 10 },
@@ -1356,4 +1441,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   btnGhostText: { color: '#2563EB', fontWeight: '600', fontSize:14 },
+  modalCloseBtn: {
+  width: 36,
+  height: 36,
+  borderRadius: 18,
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: '#F3F4F6',
+  marginLeft: 10,
+},
+
 });

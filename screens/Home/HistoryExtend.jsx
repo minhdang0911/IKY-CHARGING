@@ -77,6 +77,23 @@ export default function HistoryExtend({ navigateToScreen }) {
     return () => sub.remove();
   }, [goBack]);
 
+  useEffect(() => {
+  if (Platform.OS !== 'web') return;
+  const TARGET_PATH = '/';
+  window.history.replaceState(null, '', TARGET_PATH);
+
+  const handlePopState = () => {  
+    window.history.replaceState(null, '', TARGET_PATH);
+    goBack(); 
+  };
+  window.history.pushState(null, '', TARGET_PATH);
+  window.addEventListener('popstate', handlePopState);
+
+  return () => {
+    window.removeEventListener('popstate', handlePopState);
+  };
+}, [goBack]);
+
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: (e) => e.nativeEvent.pageX <= 24,
     onMoveShouldSetPanResponder: (e, g) => e.nativeEvent.pageX <= 24 && Math.abs(g.dx) > 8,

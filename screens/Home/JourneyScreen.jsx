@@ -256,10 +256,9 @@ export default function JourneyScreen({ navigateToScreen }) {
                 values={revenueData.map(i => i.revenue)}
                 accent="#2563EB"
                 onBarPress={i => setSelectedMonth(revenueData[i]?.month || '')}
-                tooltipMode="press"      // 👈 chỉ bấm mới hiện
-                alwaysShowValue={false}  // 👈 không in số trên đỉnh
+                tooltipMode="press"
+                alwaysShowValue={false}
               />
-
               </ScrollView>
             </View>
 
@@ -325,24 +324,35 @@ export default function JourneyScreen({ navigateToScreen }) {
             <ViewShot
               ref={reportRef}
               options={{ format: 'png', quality: 0.98 }}
-              style={{ backgroundColor: '#fff', width: 1080, padding: 32, borderRadius: 24 }}
+              style={{ backgroundColor: '#F8FAFC', width: 1080, padding: 32, borderRadius: 24 }}
             >
-              <View style={{ marginBottom: 18 }}>
-                <Text style={{ fontSize: 28, fontWeight: '800', color: '#111827' }}>
+              {/* Header */}
+              <View style={{ marginBottom: 24, backgroundColor: '#fff', padding: 20, borderRadius: 16, borderLeftWidth: 4, borderLeftColor: '#2563EB' }}>
+                <Text style={{ fontSize: 32, fontWeight: '800', color: '#111827' }}>
                   {L.header} / {L.monthlyRevenue}
                 </Text>
-                <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 6 }}>
+                <Text style={{ fontSize: 14, color: '#6B7280', marginTop: 8 }}>
                   {new Date().toLocaleString('vi-VN')}
                 </Text>
               </View>
 
-              <KPIStats L={L} revenueData={revenueData} />
+              {/* KPI Statistics Cards */}
+              <View style={{ marginBottom: 20 }}>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: '#111827', marginBottom: 12, paddingHorizontal: 4 }}>
+                  📊 Thống kê tổng quan
+                </Text>
+                <KPIStats L={L} revenueData={revenueData} />
+              </View>
 
-              <View style={{ marginTop: 10, backgroundColor: '#fff', borderRadius: 16 }}>
+              {/* Chart */}
+              <View style={{ marginBottom: 20, backgroundColor: '#fff', borderRadius: 16, padding: 20, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } }}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827', marginBottom: 16 }}>
+                  📈 Biểu đồ doanh thu theo tháng
+                </Text>
                 <FancyChart
                   mode="bar"
-                  width={1016}
-                  height={420}
+                  width={1000}
+                  height={340}
                   labels={revenueData.map(i => i.month)}
                   values={revenueData.map(i => i.revenue)}
                   accent="#2563EB"
@@ -351,32 +361,137 @@ export default function JourneyScreen({ navigateToScreen }) {
                 />
               </View>
 
+              {/* High/Low Summary */}
               {maxMin ? (
-                <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                <View style={{ flexDirection: 'row', gap: 12, marginBottom: 20 }}>
                   <View style={{
-                    flexDirection:'row',alignItems:'center',gap:6,backgroundColor:'#EAF6FF',
-                    borderRadius:999,paddingHorizontal:12,paddingVertical:8,
+                    flex: 1,
+                    flexDirection:'row',
+                    alignItems:'center',
+                    gap:10,
+                    backgroundColor:'#EFF6FF',
+                    borderRadius:16,
+                    paddingHorizontal:16,
+                    paddingVertical:14,
+                    borderWidth: 2,
+                    borderColor: '#BFDBFE',
                   }}>
-                    <Icon name="trending-up" size={18} color="#0EA5E9" />
-                    <Text style={{ fontWeight:'700', color:'#0F172A' }}>
-                      {L.highest}: {maxMin.max.month} — {(maxMin.max.revenue || 0).toLocaleString('vi-VN')}đ
-                    </Text>
+                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="trending-up" size={24} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 12, color: '#64748B', fontWeight: '600', marginBottom: 2 }}>
+                        {L.highest}
+                      </Text>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#1E40AF', marginBottom: 2 }}>
+                        {maxMin.max.month}
+                      </Text>
+                      <Text style={{ fontSize: 18, fontWeight: '800', color: '#1E3A8A' }}>
+                        {(maxMin.max.revenue || 0).toLocaleString('vi-VN')}đ
+                      </Text>
+                    </View>
                   </View>
+                  
                   <View style={{
-                    flexDirection:'row',alignItems:'center',gap:6,backgroundColor:'#FEE2E2',
-                    borderRadius:999,paddingHorizontal:12,paddingVertical:8,
+                    flex: 1,
+                    flexDirection:'row',
+                    alignItems:'center',
+                    gap:10,
+                    backgroundColor:'#FEF2F2',
+                    borderRadius:16,
+                    paddingHorizontal:16,
+                    paddingVertical:14,
+                    borderWidth: 2,
+                    borderColor: '#FECACA',
                   }}>
-                    <Icon name="trending-down" size={18} color="#EF4444" />
-                    <Text style={{ fontWeight:'700', color:'#0F172A' }}>
-                      {L.lowest}: {maxMin.min.month} — {(maxMin.min.revenue || 0).toLocaleString('vi-VN')}đ
-                    </Text>
+                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon name="trending-down" size={24} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 12, color: '#64748B', fontWeight: '600', marginBottom: 2 }}>
+                        {L.lowest}
+                      </Text>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#B91C1C', marginBottom: 2 }}>
+                        {maxMin.min.month}
+                      </Text>
+                      <Text style={{ fontSize: 18, fontWeight: '800', color: '#991B1B' }}>
+                        {(maxMin.min.revenue || 0).toLocaleString('vi-VN')}đ
+                      </Text>
+                    </View>
                   </View>
                 </View>
               ) : null}
 
-              <Text style={{ marginTop: 14, color: '#94A3B8', fontSize: 12, textAlign: 'right' }}>
-                {L.watermark}
-              </Text>
+              {/* Compare Section */}
+              {a && b ? (
+                <View style={{ marginBottom: 20, backgroundColor: '#fff', borderRadius: 16, padding: 20 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827', marginBottom: 16 }}>
+                    🔄 So sánh doanh thu
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 12 }}>
+                    {/* Month 1 */}
+                    <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                      <Text style={{ fontSize: 11, color: '#64748B', fontWeight: '600', marginBottom: 4 }}>
+                        Tháng 1
+                      </Text>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 6 }}>
+                        {m1}
+                      </Text>
+                      <Text style={{ fontSize: 20, fontWeight: '800', color: '#2563EB' }}>
+                        {(a.revenue || 0).toLocaleString('vi-VN')}đ
+                      </Text>
+                    </View>
+
+                    {/* VS */}
+                    <View style={{ justifyContent: 'center', alignItems: 'center', width: 48 }}>
+                      <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#EEF2FF', alignItems: 'center', justifyContent: 'center' }}>
+                        <Text style={{ fontSize: 14, fontWeight: '800', color: '#4F46E5' }}>VS</Text>
+                      </View>
+                    </View>
+
+                    {/* Month 2 */}
+                    <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#E2E8F0' }}>
+                      <Text style={{ fontSize: 11, color: '#64748B', fontWeight: '600', marginBottom: 4 }}>
+                        Tháng 2
+                      </Text>
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 6 }}>
+                        {m2}
+                      </Text>
+                      <Text style={{ fontSize: 20, fontWeight: '800', color: '#2563EB' }}>
+                        {(b.revenue || 0).toLocaleString('vi-VN')}đ
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Result */}
+                  <View style={{ marginTop: 14, backgroundColor: b.revenue > a.revenue ? '#ECFDF5' : b.revenue < a.revenue ? '#FEF2F2' : '#F8FAFC', borderRadius: 12, padding: 12, alignItems: 'center' }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Icon 
+                        name={b.revenue > a.revenue ? 'trending-up' : b.revenue < a.revenue ? 'trending-down' : 'horizontal-rule'} 
+                        size={20} 
+                        color={b.revenue > a.revenue ? '#10B981' : b.revenue < a.revenue ? '#EF4444' : '#64748B'} 
+                      />
+                      <Text style={{ fontSize: 14, fontWeight: '700', color: b.revenue > a.revenue ? '#059669' : b.revenue < a.revenue ? '#DC2626' : '#64748B' }}>
+                        {b.revenue > a.revenue ? L.increase : b.revenue < a.revenue ? L.decrease : L.equal}
+                        {' '}
+                        {Math.abs(b.revenue - a.revenue).toLocaleString('vi-VN')}đ
+                        {' '}
+                        ({a.revenue ? Math.round(Math.abs(((b.revenue - a.revenue) / a.revenue) * 100)) : 0}%)
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              ) : null}
+
+              {/* Footer */}
+              <View style={{ borderTopWidth: 1, borderTopColor: '#E5E7EB', paddingTop: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ color: '#94A3B8', fontSize: 13, fontWeight: '600' }}>
+                  {L.watermark}
+                </Text>
+                <Text style={{ color: '#CBD5E1', fontSize: 11 }}>
+                  IKY Charging © 2025
+                </Text>
+              </View>
             </ViewShot>
           </View>
         )}
@@ -445,4 +560,3 @@ const s = StyleSheet.create({
   },
   tipText: { color: '#fff', fontSize: 14 },
 });
-  

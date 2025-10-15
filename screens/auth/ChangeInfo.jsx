@@ -35,6 +35,7 @@ const ChangeInfo = ({ navigateToScreen, navigation }) => {
     return true;
   }, [goInformation]);
 
+  // Xử lý nút Back trên Android/Mobile
   useEffect(() => {
     const sub = BackHandler.addEventListener(
       'hardwareBackPress',
@@ -43,6 +44,7 @@ const ChangeInfo = ({ navigateToScreen, navigation }) => {
     return () => sub.remove();
   }, [handleBackPress]);
 
+  // Xử lý navigation.addListener (React Navigation)
   useEffect(() => {
     if (!navigation?.addListener) return;
     const unsub = navigation.addListener('beforeRemove', e => {
@@ -51,6 +53,30 @@ const ChangeInfo = ({ navigateToScreen, navigation }) => {
     });
     return unsub;
   }, [navigation, goInformation]);
+
+  // Chặn nút Back của browser trên Web
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      // Đổi URL về localhost:3000 (không có hash)
+      window.history.replaceState(null, '', '/');
+      
+      const handlePopState = (event) => {
+        // Giữ URL không đổi
+        window.history.replaceState(null, '', '/');
+        
+        // Navigate về trang Information thay vì thoát web
+        goInformation();
+      };
+
+      // Push một state để có thể bắt được sự kiện back
+      window.history.pushState(null, '', '/');
+      window.addEventListener('popstate', handlePopState);
+
+      return () => {
+        window.removeEventListener('popstate', handlePopState);
+      };
+    }
+  }, [goInformation]);
 
   const handleNotificationPress = () => {
     navigateToScreen &&
@@ -77,7 +103,7 @@ const ChangeInfo = ({ navigateToScreen, navigation }) => {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
-           <Text style={{fontSize: 30, color: '#fff'}}>{'‹'}</Text>
+            <Text style={{fontSize: 30, color: '#fff'}}>{'‹'}</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {t('headerTitle')}

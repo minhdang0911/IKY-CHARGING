@@ -73,11 +73,13 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
     return true;
   }, [navigateToScreen]);
 
+  // Xử lý nút Back trên Android/Mobile
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
     return () => sub.remove();
   }, [handleBackPress]);
 
+  // Xử lý navigation.addListener (React Navigation)
   useEffect(() => {
     if (!navigation || typeof navigation.addListener !== 'function') return;
     const unsub = navigation.addListener('beforeRemove', (e) => {
@@ -86,6 +88,30 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
     });
     return unsub;
   }, [navigation, handleBackPress]);
+
+  // Chặn nút Back của browser trên Web
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      // Đổi URL về localhost:3000 (không có hash)
+      window.history.replaceState(null, '', '/');
+      
+      const handlePopState = (event) => {
+        // Giữ URL không đổi
+        window.history.replaceState(null, '', '/');
+        
+        // Navigate về trang Information thay vì thoát web
+        handleBackPress();
+      };
+
+      // Push một state để có thể bắt được sự kiện back
+      window.history.pushState(null, '', '/');
+      window.addEventListener('popstate', handlePopState);
+
+      return () => {
+        window.removeEventListener('popstate', handlePopState);
+      };
+    }
+  }, [handleBackPress]);
 
   const openMap = (address) => {
     const query = encodeURIComponent(address);
@@ -311,7 +337,7 @@ const s = StyleSheet.create({
     alignSelf: 'flex-start',
   },
 
-  
+  rowTextWrap: { flex: 1, minWidth: 0 },
   rowLabel: { fontSize: 12, color: '#64748b' },
   rowValue: { fontSize: 12, color: '#0f172a', fontWeight: '600', marginTop: 2 },
   divider: { height: 1, backgroundColor: '#eef2f7' },

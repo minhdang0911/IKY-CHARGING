@@ -1,4 +1,3 @@
-// App.js
 import React, { useEffect, useState, useRef } from 'react';
 import {
   StatusBar,
@@ -213,6 +212,9 @@ export default function App() {
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
 
+  // 👇 NEW: điều khiển ẩn/hiện navBottom theo yêu cầu từ screen
+  const [bottomHidden, setBottomHidden] = useState(false);
+
   // Giữ navigateToScreen mới nhất trong ref để handler SSE không bị recreate
   const navRef = useRef(navigateToScreen);
   useEffect(() => { navRef.current = navigateToScreen; }, [navigateToScreen]);
@@ -241,19 +243,18 @@ export default function App() {
     (async () => {
       try {
         const access = await AsyncStorage.getItem(K_ACCESS);
-       if (access) {
-  restoreSession();
-  startRefreshLoopOnce(navigateToScreen);
-  sseManager.start(access);
+        if (access) {
+          restoreSession();
+          startRefreshLoopOnce(navigateToScreen);
+          sseManager.start(access);
 
-  const expiresAt = parseInt(await AsyncStorage.getItem(K_EXPIRES_AT), 10) || 0;
-  const now = Date.now();
-  if (!expiresAt || expiresAt - now < 10 * 60 * 1000) {
-    // chỉ force refresh nếu sắp hết hạn (<10 phút)
-    try { await doRefreshToken(navigateToScreen, { force: true }); } catch {}
-  }
-}
-else {
+          const expiresAt = parseInt(await AsyncStorage.getItem(K_EXPIRES_AT), 10) || 0;
+          const now = Date.now();
+          if (!expiresAt || expiresAt - now < 10 * 60 * 1000) {
+            // chỉ force refresh nếu sắp hết hạn (<10 phút)
+            try { await doRefreshToken(navigateToScreen, { force: true }); } catch {}
+          }
+        } else {
           navigateToScreen('Login');
         }
       } catch (e) {
@@ -265,20 +266,17 @@ else {
   }, [navigateToScreen, restoreSession]);
 
   // AppState: foreground → refresh ngay; background → dừng loop
- useEffect(() => {
-  const sub = AppState.addEventListener('change', async (state) => {
-    if (state === 'active') {
-      // Đừng force refresh mỗi lần foreground
-      try { await doRefreshToken(navigateToScreen, { force: false }); console.log('⏱ Last refresh:', new Date(lastRefreshAt).toLocaleTimeString());
- } catch {}
-      startRefreshLoopOnce(navigateToScreen);
-    } else {
-      clearRefreshLoop();
-    }
-  });
-  return () => { try { sub.remove(); } catch {} };
-}, [navigateToScreen]);
-
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (state) => {
+      if (state === 'active') {
+        try { await doRefreshToken(navigateToScreen, { force: false }); console.log('⏱ Last refresh:', new Date(lastRefreshAt).toLocaleTimeString()); } catch {}
+        startRefreshLoopOnce(navigateToScreen);
+      } else {
+        clearRefreshLoop();
+      }
+    });
+    return () => { try { sub.remove(); } catch {} };
+  }, [navigateToScreen]);
 
   const handleLogin = async (userData = null) => {
     login(userData);
@@ -317,7 +315,7 @@ else {
       case 'ForgotPassword': return <ForgotPasswordScreen goBack={goBack} navigateToScreen={navigateToScreen} screenData={screenData} />;
       case 'forgotStep2': return <ForgotPasswordStep2Screen goBack={goBack} navigateToScreen={navigateToScreen} screenData={screenData} />;
       case 'forgotStep3': return <ForgotPasswordStep3Screen goBack={goBack} navigateToScreen={navigateToScreen} screenData={screenData} />;
-      case 'Monitoring': return <MonitoringScreen logout={handleLogout} navigateToScreen={navigateToScreen} />;
+      case 'Monitoring': return <MonitoringScreen logout={handleLogout} navigateToScreen={navigateToScreen} setBottomHidden={setBottomHidden} />;
       case 'devicesInfo': return <DevicesInfo logout={handleLogout} navigateToScreen={navigateToScreen} screenData={screenData} />;
       case 'notification': return <Notification navigateToScreen={navigateToScreen} screenData={screenData} />;
       case 'paymentConfirm': return <PaymentConfirm navigateToScreen={navigateToScreen} screenData={screenData} />;
@@ -347,13 +345,18 @@ else {
   }
 
   const currentTab = SCREEN_TO_TAB[currentScreen] || 'Monitoring';
-  const hideTab = kbVisible || screensWithoutBottomNav.includes(currentScreen);
+  const hideTab = kbVisible || screensWithoutBottomNav.includes(currentScreen) || bottomHidden;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1e88e5" />
       {renderCurrentScreen()}
-      {!hideTab && <BottomTabNavigation currentScreen={currentTab} navigateToScreen={navigateToScreen} />}
+      {!hideTab && (
+        <BottomTabNavigation
+          currentScreen={currentTab}
+          navigateToScreen={navigateToScreen}
+        />
+      )}
 
       {busy.active && (
         <View style={styles.overlay}>
