@@ -1,3 +1,4 @@
+// screens/Home/ChargingSession.jsx  (MOBILE - search trên, dưới là dropdown + tải CSV)
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   SafeAreaView,
@@ -11,9 +12,16 @@ import {
   Platform,
   BackHandler,
   PanResponder,
+  Modal,
+  Pressable,
+  ScrollView,
+  PermissionsAndroid,
+  ToastAndroid,
+  Alert,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import RNFS from 'react-native-fs';
 import { getSessions } from '../../apis/devices';
 import SearchBar from '../../components/SearchBar';
 import PaginationControls from '../../components/PaginationControls';
@@ -63,10 +71,75 @@ function fmt(dt) {
   } catch { return '—'; }
 }
 
+function monthKey(dt) {
+  if (!dt) return null;
+  const d = new Date(dt);
+  if (Number.isNaN(d.getTime())) return null;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${yyyy}-${mm}`; // 2025-10
+}
+function monthLabelSlash(key) {
+  if (!key || key === 'all') return 'Tất cả (trang hiện tại)';
+  const [y, m] = key.split('-');
+  return `${m}/${y}`;
+}
+
 function diffDays(fromISO) {
   if (!fromISO) return Number.POSITIVE_INFINITY;
   const from = new Date(fromISO).getTime();
   return Math.floor((Date.now() - from) / (24 * 60 * 60 * 1000));
+}
+
+const toast = (msg) => {
+  if (Platform.OS === 'android') ToastAndroid.show(msg, ToastAndroid.SHORT);
+  else Alert.alert('', msg);
+};
+
+/* ===================== Month Picker (native Modal) ===================== */
+function MonthPickerModal({ visible, onClose, options = [], value, onSelect }) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+        <Pressable style={styles.modalSheet} onStartShouldSetResponder={() => true}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Chọn tháng</Text>
+            <TouchableOpacity onPress={onClose} style={styles.modalClose}>
+              <Icon name="close" size={18} color="#6B7280" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={{ maxHeight: 360 }}>
+            <TouchableOpacity
+              onPress={() => { onSelect('all'); onClose(); }}
+              style={[styles.mItem, value === 'all' && styles.mItemActive]}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.mItemText, value === 'all' && styles.mItemTextActive]}>
+                Tất cả (trang hiện tại)
+              </Text>
+            </TouchableOpacity>
+
+            {options.map((k) => {
+              const active = value === k;
+              return (
+                <TouchableOpacity
+                  key={k}
+                  onPress={() => { onSelect(k); onClose(); }}
+                  style={[styles.mItem, active && styles.mItemActive]}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.mItemText, active && styles.mItemTextActive]}>
+                    {monthLabelSlash(k)}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
 }
 
 /* ===================== Screen ===================== */
@@ -110,6 +183,14 @@ export default function ChargingSession({ navigateToScreen }) {
   const [status, setStatus] = useState('all'); // giữ sẵn nếu sau này thêm dropdown
   const [range, setRange] = useState('all');
 
+  // month filter (mobile)
+  const [monthOptions, setMonthOptions] = useState([]); // ['2025-10', ...] từ trang hiện tại
+  const [selectedMonth, setSelectedMonth] = useState('all');
+  const [monthModal, setMonthModal] = useState(false);
+  const [monthTotalKWh, setMonthTotalKWh] = useState(0);
+  const [monthLoading, setMonthLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
   const fetchPage = useCallback(async (p = 1) => {
     setLoading(true);
     try {
@@ -118,17 +199,31 @@ export default function ChargingSession({ navigateToScreen }) {
       if (search.trim()) params.search = search.trim(); // ?search=ORDER_ID
       const res = await getSessions(token, params);
 
-      setItems(Array.isArray(res?.data) ? res.data : []);
+      const arr = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+      setItems(arr);
       setTotalPages(res?.totalPages || 1);
       setPage(res?.page || p);
+
+      // build month options from this page
+      const keys = new Set();
+      for (const it of arr) {
+        const mk = monthKey(it?.startTime || it?.endTime);
+        if (mk) keys.add(mk);
+      }
+      const opts = Array.from(keys).sort((a, b) => (a > b ? -1 : 1));
+      setMonthOptions(opts);
+      if (selectedMonth !== 'all' && !opts.includes(selectedMonth)) {
+        setSelectedMonth('all');
+      }
     } catch (e) {
       console.warn('Lỗi lấy phiên sạc:', e?.message || e);
       setItems([]);
       setTotalPages(1);
+      setMonthOptions([]);
     } finally {
       setLoading(false);
     }
-  }, [limit, search]);
+  }, [limit, search, selectedMonth]);
 
   useEffect(() => { fetchPage(1); }, [fetchPage]);
 
@@ -137,9 +232,59 @@ export default function ChargingSession({ navigateToScreen }) {
     try { await fetchPage(page); } finally { setRefreshing(false); }
   }, [fetchPage, page]);
 
-  // FE filter cho status & range (search đã do backend xử lý)
+  // tính tổng kWh toàn tháng (đi qua tất cả page)
+  const recomputeMonthTotal = useCallback(async (targetMonth) => {
+    if (targetMonth === 'all') {
+      setMonthTotalKWh(0);
+      return;
+    }
+    try {
+      setMonthLoading(true);
+      const token = await getAccessTokenSafe();
+
+      let p = 1;
+      let tp = 1;
+      let total = 0;
+
+      do {
+        const params = { page: p, limit };
+        if (search.trim()) params.search = search.trim();
+        const res = await getSessions(token, params);
+        const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+
+        for (const it of list) {
+          const mk = monthKey(it?.startTime || it?.endTime);
+          if (mk === targetMonth) {
+            const kwh = Number(it?.energy_used_kwh ?? it?.energy_kwh ?? it?.energy ?? 0);
+            if (Number.isFinite(kwh)) total += kwh;
+          }
+        }
+
+        const lim = Number(res?.limit ?? res?.per_page ?? limit) || limit;
+        const totalItems = Number(res?.total ?? 0);
+        tp = res?.totalPages ?? res?.total_pages
+          ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
+
+        p += 1;
+      } while (p <= tp);
+
+      setMonthTotalKWh(total);
+    } catch (e) {
+      console.warn('Lỗi tính tổng tháng:', e?.message || e);
+      setMonthTotalKWh(0);
+    } finally {
+      setMonthLoading(false);
+    }
+  }, [limit, search]);
+
+  useEffect(() => { recomputeMonthTotal(selectedMonth); }, [selectedMonth, recomputeMonthTotal]);
+
+  // FE filter cho status, range, month (trên trang hiện tại)
   const filtered = useMemo(() => {
     return (items || []).filter((it) => {
+      const mk = monthKey(it?.startTime || it?.endTime);
+      const matchMonth = selectedMonth === 'all' || mk === selectedMonth;
+
       const st = String(it?.status || '').toLowerCase();
       const matchStatus = status === 'all' || st === status;
 
@@ -147,10 +292,117 @@ export default function ChargingSession({ navigateToScreen }) {
       if (range === '7d') matchRange = diffDays(it?.startTime || it?.endTime) <= 7;
       if (range === '30d') matchRange = diffDays(it?.startTime || it?.endTime) <= 30;
 
-      return matchStatus && matchRange;
+      return matchMonth && matchStatus && matchRange;
     });
-  }, [items, status, range]);
+  }, [items, status, range, selectedMonth]);
 
+  /* ================= Export CSV (save to device) ================= */
+  const fetchAllPages = useCallback(async () => {
+    const token = await getAccessTokenSafe();
+    let p = 1;
+    let tp = 1;
+    const all = [];
+    do {
+      const params = { page: p, limit };
+      if (search.trim()) params.search = search.trim();
+      const res = await getSessions(token, params);
+      const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+      all.push(...list);
+
+      const lim = Number(res?.limit ?? res?.per_page ?? limit) || limit;
+      const totalItems = Number(res?.total ?? 0);
+      tp = res?.totalPages ?? res?.total_pages
+        ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
+      p += 1;
+    } while (p <= tp);
+    return all;
+  }, [limit, search]);
+
+  const csvEscape = (v) => {
+    const s = String(v ?? '');
+    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+
+  const toRow = (it) => ({
+    order: String(it?.order_id ?? ''),
+    device: String(it?.device_id?.name ?? ''),
+    port: String(it?.portNumber ?? ''),
+    status: viStatus(it?.status),
+    start: fmt(it?.startTime),
+    end: fmt(it?.endTime),
+    kwh: Number(it?.energy_used_kwh ?? it?.energy_kwh ?? it?.energy ?? 0),
+    month: monthLabelSlash(monthKey(it?.startTime || it?.endTime) || ''),
+  });
+
+  const exportCSV = useCallback(async () => {
+    try {
+      setExporting(true);
+
+      // Android < 29 xin quyền ghi
+      if (Platform.OS === 'android' && Platform.Version < 29) {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          toast('Thiếu quyền lưu file');
+          setExporting(false);
+          return;
+        }
+      }
+
+      const data = await fetchAllPages();
+
+      // tổng theo tháng
+      const totals = new Map();
+      for (const it of data) {
+        const k = monthLabelSlash(monthKey(it?.startTime || it?.endTime) || '');
+        if (!k) continue;
+        const kwh = Number(it?.energy_used_kwh ?? it?.energy_kwh ?? it?.energy ?? 0) || 0;
+        totals.set(k, (totals.get(k) || 0) + kwh);
+      }
+      const totalRows = Array.from(totals.entries())
+        .sort((a, b) => (a[0] > b[0] ? -1 : 1))
+        .map(([k, v]) => [k, Number(v.toFixed(3))]);
+
+      // build CSV text
+      const lines = [];
+      lines.push('Tổng kWh theo tháng,,');
+      lines.push(['Tháng','Tổng kWh'].map(csvEscape).join(','));
+      totalRows.forEach(r => lines.push(r.map(csvEscape).join(',')));
+      lines.push('');
+
+      const header = ['Mã đơn','Thiết bị','Cổng','Trạng thái','Bắt đầu','Kết thúc','Năng lượng (kWh)','Tháng'];
+      lines.push(header.map(csvEscape).join(','));
+      data.map(toRow).forEach((r) => {
+        lines.push([
+          r.order, r.device, r.port, r.status, r.start, r.end, r.kwh, r.month
+        ].map(csvEscape).join(','));
+      });
+
+      const csv = lines.join('\n');
+
+      const now = new Date();
+      const fname = `charging_sessions_${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}.csv`;
+
+      let path = '';
+      if (Platform.OS === 'android') {
+        path = (RNFS.DownloadDirectoryPath || RNFS.ExternalStorageDirectoryPath) + '/' + fname;
+      } else {
+        path = RNFS.DocumentDirectoryPath + '/' + fname;
+      }
+
+      await RNFS.writeFile(path, csv, 'utf8');
+      toast(`Đã lưu: ${path}`);
+    } catch (e) {
+      console.warn('Export CSV error:', e);
+      toast('Xuất CSV lỗi: ' + (e?.message || e));
+    } finally {
+      setExporting(false);
+    }
+  }, [fetchAllPages]);
+
+  /* ================= RENDER ================= */
   const renderItem = ({ item }) => {
     const dev = item?.device_id || {};
     const st = String(item?.status || '').toLowerCase();
@@ -168,7 +420,6 @@ export default function ChargingSession({ navigateToScreen }) {
           </View>
 
           <View style={[styles.statusPill, { backgroundColor: `${color}1A`, borderColor: color }]}>
-            <Icon name="bolt" size={14} color={color} />
             <Text style={[styles.statusText, { color }]}>{viStatus(st)}</Text>
           </View>
         </View>
@@ -192,6 +443,21 @@ export default function ChargingSession({ navigateToScreen }) {
     );
   };
 
+  const MonthTotalCard = () => {
+    if (selectedMonth === 'all') return null;
+    return (
+      <View style={styles.totalCard}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text style={styles.totalTitle}>Tổng tháng {monthLabelSlash(selectedMonth)}</Text>
+          {monthLoading
+            ? <ActivityIndicator size="small" color="#2563EB" />
+            : <Text style={styles.totalValue}>{Number(monthTotalKWh || 0).toFixed(2)} kWh</Text>}
+        </View>
+        <Text style={styles.totalHint}>(Tính trên toàn bộ dữ liệu của tháng qua tất cả các trang)</Text>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container} {...panResponder.panHandlers}>
       {/* Header */}
@@ -203,8 +469,8 @@ export default function ChargingSession({ navigateToScreen }) {
         <View style={{ width: 24 }} />
       </View>
 
-      {/* Search (chỉ mã đơn) */}
-      <View style={styles.filterBar}>
+      {/* Search: 1 hàng riêng */}
+      <View style={styles.searchWrap}>
         <SearchBar
           placeholder="Nhập mã đơn để tìm kiếm"
           value={search}
@@ -212,6 +478,35 @@ export default function ChargingSession({ navigateToScreen }) {
           onClear={() => { setSearch(''); fetchPage(1); }}
           onSubmit={() => fetchPage(1)}
         />
+      </View>
+
+      {/* Hàng actions: Dropdown tháng + Tải CSV */}
+      <View style={styles.actionRow}>
+        <TouchableOpacity
+          onPress={() => setMonthModal(true)}
+          style={styles.monthBtn}
+          activeOpacity={0.85}
+        >
+          <Text style={styles.monthBtnText} numberOfLines={1}>
+            {monthLabelSlash(selectedMonth)}
+          </Text>
+          <Icon name="arrow-drop-down" size={22} color="#2563EB" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={exportCSV}
+          style={[styles.exportBtn, exporting && { opacity: 0.7 }]}
+          activeOpacity={0.85}
+          disabled={exporting}
+        >
+          <Icon name="file-download" size={18} color="#fff" />
+          <Text style={styles.exportText}>{exporting ? 'Đang xuất…' : 'Tải báo cáo'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Tổng tháng */}
+      <View style={{ paddingHorizontal: 16 }}>
+        <MonthTotalCard />
       </View>
 
       {/* Nội dung */}
@@ -224,7 +519,7 @@ export default function ChargingSession({ navigateToScreen }) {
         <>
           <FlatList
             data={filtered}
-            keyExtractor={(it) => String(it?._id || Math.random())}
+            keyExtractor={(it, idx) => String(it?._id || it?.order_id || idx)}
             renderItem={renderItem}
             ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
             contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
@@ -240,11 +535,20 @@ export default function ChargingSession({ navigateToScreen }) {
           <PaginationControls
             page={page}
             totalPages={totalPages}
-            onPrev={() => fetchPage(page - 1)}
-            onNext={() => fetchPage(page + 1)}
+            onPrev={() => fetchPage(Math.max(1, page - 1))}
+            onNext={() => fetchPage(Math.min(totalPages, page + 1))}
           />
         </>
       )}
+
+      {/* Month picker modal */}
+      <MonthPickerModal
+        visible={monthModal}
+        onClose={() => setMonthModal(false)}
+        options={monthOptions}
+        value={selectedMonth}
+        onSelect={(k) => { setSelectedMonth(k); setPage(1); }}
+      />
     </SafeAreaView>
   );
 }
@@ -252,6 +556,7 @@ export default function ChargingSession({ navigateToScreen }) {
 /* ================= styles ================= */
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F6F7FB' },
+
   header: {
     backgroundColor: '#4A90E2',
     paddingHorizontal: 16,
@@ -262,8 +567,43 @@ const styles = StyleSheet.create({
   },
   backButton: { padding: 6, marginRight: 6 },
   headerTitle: { flex: 1, color: '#fff', fontSize: 18, fontWeight: '700' },
-  filterBar: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 0 },
+
+  searchWrap: { paddingHorizontal: 16, paddingTop: 12 },
+
+  actionRow: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  monthBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2563EB',
+    paddingHorizontal: 10,
+    height: 40,
+    backgroundColor: '#fff',
+  },
+  monthBtnText: { color: '#2563EB', fontWeight: '800', flex: 1 },
+
+  exportBtn: {
+    backgroundColor: '#10B981',
+    borderRadius: 12,
+    height: 40,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  exportText: { color: '#fff', fontWeight: '800' },
+
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+
   card: {
     backgroundColor: '#fff',
     borderRadius: 14,
@@ -278,16 +618,15 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 15, fontWeight: '800', color: '#111827' },
   sub: { marginTop: 2, fontSize: 12, color: '#6b7280' },
   bold: { fontWeight: '800', color: '#111827' },
+
   statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 999,
     borderWidth: 1,
-    marginLeft: 8,
   },
-  statusText: { fontSize: 12, fontWeight: '700', marginLeft: 4 },
+  statusText: { fontSize: 12, fontWeight: '700' },
+
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -297,6 +636,63 @@ const styles = StyleSheet.create({
   },
   k: { flex: 1, fontSize: 13, color: '#6b7280' },
   v: { fontSize: 13, fontWeight: '700', color: '#111827' },
+
   emptyWrap: { padding: 24, alignItems: 'center' },
   emptyText: { marginTop: 8, color: '#94a3b8', fontWeight: '600' },
+
+  // month modal
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalSheet: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  modalHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFF',
+  },
+  modalTitle: { fontSize: 15, fontWeight: '800', color: '#111827' },
+  modalClose: {
+    width: 28, height: 28, borderRadius: 14, backgroundColor: '#F3F4F6',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  mItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#F1F5F9',
+    backgroundColor: '#fff',
+  },
+  mItemActive: { backgroundColor: '#2563EB' },
+  mItemText: { color: '#111827', fontWeight: '700' },
+  mItemTextActive: { color: '#fff', fontWeight: '800' },
+
+  // tổng tháng
+  totalCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    marginBottom: 6,
+  },
+  totalTitle: { fontSize: 13, fontWeight: '800', color: '#111827' },
+  totalValue: { fontSize: 18, fontWeight: '900', color: '#111827' },
+  totalHint: { marginTop: 4, fontSize: 11, color: '#6B7280' },
 });
