@@ -1,4 +1,3 @@
-// App.js
 import React, { useEffect, useState, useRef } from 'react';
 import {
   StatusBar,
@@ -52,7 +51,7 @@ const K_EXPIRES_AT = 'expires_at';
 const K_USERNAME = 'username';
 const K_USER_OID = 'user_oid';
 
-// ===== Auto refresh 2 phút =====
+// ===== Auto refresh =====
 const LOOP_MS = 40 * 60 * 1000; 
 const MIN_GAP_MS = 20 * 60 * 1000;
 
@@ -78,7 +77,6 @@ async function hardLogout(navigateToScreen) {
   navigateToScreen('Login');
 }
 
-// helper: ngủ ms
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function doRefreshToken(navigateToScreen, { force = false } = {}) {
@@ -93,18 +91,14 @@ async function doRefreshToken(navigateToScreen, { force = false } = {}) {
     if (!refresh || !access) { refreshInFlight = null; return; }
 
     let attempt = 0;
-    let backoff = 2000; // 2s → 4s → 8s (max 30s)
+    let backoff = 2000;
 
     while (true) {
       try {
-        console.log('🔄 Refreshing access token… (attempt', attempt + 1, ')');
-        // ✅ truyền cả refresh + access vào
         const data = await refreshAccessToken(refresh, access);
-
         if (!data || (!data.accessToken && !data.refreshToken)) {
           throw new Error('Bad refresh payload');
         }
-
         const pairs = [
           [K_ACCESS, data.accessToken || ''],
           [K_REFRESH, data.refreshToken || refresh],
@@ -113,34 +107,21 @@ async function doRefreshToken(navigateToScreen, { force = false } = {}) {
         await AsyncStorage.multiSet(pairs);
 
         lastRefreshAt = Date.now();
-        console.log('✅ Refreshed OK.');
-        if (data.accessToken) {
-          try { sseManager.updateToken(data.accessToken); } catch {}
-        }
-        break; // DONE
+        if (data.accessToken) { try { sseManager.updateToken(data.accessToken); } catch {} }
+        break;
       } catch (e) {
         const status = e?.response?.status;
         const body = e?.response?.data;
         const msg = status ? `HTTP ${status} ${JSON.stringify(body || {})}` : (e?.message || String(e));
-        console.log('❌ Refresh failed:', msg);
-
-        // 400/401/invalid -> logout
         const lower = msg.toLowerCase();
         const isAuthErr = status === 400 || status === 401
           || /invalid_grant|invalid refresh|expired|unauthorized|invalid_token/.test(lower);
-
         if (isAuthErr) {
-          console.log('🚪 Refresh token invalid → force logout');
           await hardLogout(navigateToScreen);
           break;
         }
-
-        // 5xx / network → retry với backoff, giới hạn 3 lần
         attempt += 1;
-        if (attempt >= 3) {
-          console.log('⏭️ Give up retry for now, will try again on next loop.');
-          break;
-        }
+        if (attempt >= 3) break;
         await sleep(backoff);
         backoff = Math.min(backoff * 2, 30000);
       }
@@ -159,7 +140,6 @@ function startRefreshLoopOnce(navigateToScreen) {
     try { await doRefreshToken(navigateToScreen); } catch {}
   }, LOOP_MS);
   loopArmed = true;
-  console.log(`🕒 Auto-refresh started: every ${Math.round(LOOP_MS / 60000)} minutes`);
 }
 
 const SCREEN_TO_TAB = {
@@ -213,17 +193,15 @@ export default function App() {
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
 
-  // Giữ navigateToScreen mới nhất trong ref để handler SSE không bị recreate
+  // giữ navigateToScreen mới nhất cho SSE
   const navRef = useRef(navigateToScreen);
   useEffect(() => { navRef.current = navigateToScreen; }, [navigateToScreen]);
 
-  // SSE: token die → logout + Login (gắn 1 lần)
   const sseHandlerAttached = useRef(false);
   useEffect(() => {
     if (sseHandlerAttached.current) return;
     sseHandlerAttached.current = true;
     sseManager.setAuthInvalidHandler(async () => {
-      console.log('[AUTH] SSE invalid/expired → force logout');
       await hardLogout(navRef.current);
     });
     return () => {
@@ -241,19 +219,17 @@ export default function App() {
     (async () => {
       try {
         const access = await AsyncStorage.getItem(K_ACCESS);
-       if (access) {
-  restoreSession();
-  startRefreshLoopOnce(navigateToScreen);
-  sseManager.start(access);
+        if (access) {
+          restoreSession();
+          startRefreshLoopOnce(navigateToScreen);
+          sseManager.start(access);
 
-  const expiresAt = parseInt(await AsyncStorage.getItem(K_EXPIRES_AT), 10) || 0;
-  const now = Date.now();
-  if (!expiresAt || expiresAt - now < 10 * 60 * 1000) {
-    // chỉ force refresh nếu sắp hết hạn (<10 phút)
-    try { await doRefreshToken(navigateToScreen, { force: true }); } catch {}
-  }
-}
-else {
+          const expiresAt = parseInt(await AsyncStorage.getItem(K_EXPIRES_AT), 10) || 0;
+          const now = Date.now();
+          if (!expiresAt || expiresAt - now < 10 * 60 * 1000) {
+            try { await doRefreshToken(navigateToScreen, { force: true }); } catch {}
+          }
+        } else {
           navigateToScreen('Login');
         }
       } catch (e) {
@@ -264,21 +240,18 @@ else {
     })();
   }, [navigateToScreen, restoreSession]);
 
-  // AppState: foreground → refresh ngay; background → dừng loop
- useEffect(() => {
-  const sub = AppState.addEventListener('change', async (state) => {
-    if (state === 'active') {
-      // Đừng force refresh mỗi lần foreground
-      try { await doRefreshToken(navigateToScreen, { force: false }); console.log('⏱ Last refresh:', new Date(lastRefreshAt).toLocaleTimeString());
- } catch {}
-      startRefreshLoopOnce(navigateToScreen);
-    } else {
-      clearRefreshLoop();
-    }
-  });
-  return () => { try { sub.remove(); } catch {} };
-}, [navigateToScreen]);
-
+  // AppState
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (state) => {
+      if (state === 'active') {
+        try { await doRefreshToken(navigateToScreen, { force: false }); } catch {}
+        startRefreshLoopOnce(navigateToScreen);
+      } else {
+        clearRefreshLoop();
+      }
+    });
+    return () => { try { sub.remove(); } catch {} };
+  }, [navigateToScreen]);
 
   const handleLogin = async (userData = null) => {
     login(userData);
@@ -309,6 +282,9 @@ else {
     }
   };
 
+  // Ẩn tab khi mở Drawer (từ child)
+  const [tabHiddenExtra, setTabHiddenExtra] = useState(false);
+
   const screensWithoutBottomNav = ['Login','ForgotPassword','forgotStep2','forgotStep3','changeInfo','AddDevices'];
 
   const renderCurrentScreen = () => {
@@ -317,7 +293,13 @@ else {
       case 'ForgotPassword': return <ForgotPasswordScreen goBack={goBack} navigateToScreen={navigateToScreen} screenData={screenData} />;
       case 'forgotStep2': return <ForgotPasswordStep2Screen goBack={goBack} navigateToScreen={navigateToScreen} screenData={screenData} />;
       case 'forgotStep3': return <ForgotPasswordStep3Screen goBack={goBack} navigateToScreen={navigateToScreen} screenData={screenData} />;
-      case 'Monitoring': return <MonitoringScreen logout={handleLogout} navigateToScreen={navigateToScreen} />;
+      case 'Monitoring': return (
+        <MonitoringScreen
+          logout={handleLogout}
+          navigateToScreen={navigateToScreen}
+          setTabHidden={setTabHiddenExtra}
+        />
+      );
       case 'devicesInfo': return <DevicesInfo logout={handleLogout} navigateToScreen={navigateToScreen} screenData={screenData} />;
       case 'notification': return <Notification navigateToScreen={navigateToScreen} screenData={screenData} />;
       case 'paymentConfirm': return <PaymentConfirm navigateToScreen={navigateToScreen} screenData={screenData} />;
@@ -347,14 +329,18 @@ else {
   }
 
   const currentTab = SCREEN_TO_TAB[currentScreen] || 'Monitoring';
-  const hideTab = kbVisible || screensWithoutBottomNav.includes(currentScreen);
+  const hideTabBase = kbVisible || screensWithoutBottomNav.includes(currentScreen);
+  const hideTab = hideTabBase || tabHiddenExtra;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1e88e5" />
       {renderCurrentScreen()}
-      {!hideTab && <BottomTabNavigation currentScreen={currentTab} navigateToScreen={navigateToScreen} />}
-
+      <BottomTabNavigation
+        currentScreen={currentTab}
+        navigateToScreen={navigateToScreen}
+        hidden={hideTab}
+      />
       {busy.active && (
         <View style={styles.overlay}>
           <ActivityIndicator size="large" color="#fff" />

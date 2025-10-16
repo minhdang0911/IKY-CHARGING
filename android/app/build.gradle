@@ -9,6 +9,9 @@
 // cd android -> .\gradlew clean
 // cd.. -> npx react-native run-android
 
+// ./gradlew bundleRelease -> build aab
+
+
 plugins {
     id "com.android.application"
     id "org.jetbrains.kotlin.android"

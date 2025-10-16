@@ -293,13 +293,19 @@ function applyLiveToUI(ui) {
 }
 
 /* ===================== SCREEN ===================== */
-export default function MonitoringScreen() {
+export default function MonitoringScreen({ setTabHidden }) {
   const { t, lang } = useI18n();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
   const [headerHeight, setHeaderHeight] = useState(0);
+
+  // 🔔 Ẩn/hiện bottom tab theo trạng thái drawer
+  useEffect(() => {
+    setTabHidden?.(drawerOpen);
+    return () => setTabHidden?.(false);
+  }, [drawerOpen, setTabHidden]);
 
   const [devicesMenu, setDevicesMenu] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -759,10 +765,15 @@ useEffect(() => {
 >
   <EdgeDrawer visible={drawerOpen} onClose={closeDrawer}>
     <View style={styles.drawerHeader}>
-      <View className="drawerBadge" style={styles.drawerBadge}>
-        <Icon name="ev-station" size={16} color="#fff" />
+      <View style={styles.drawerHeaderLeft}>
+        <View style={styles.drawerBadge}>
+          <Icon name="ev-station" size={16} color="#fff" />
+        </View>
+        <Text style={styles.drawerTitle}>{t('devices')}</Text>
       </View>
-      <Text style={styles.drawerTitle}>{t('devices')}</Text>
+      <TouchableOpacity onPress={closeDrawer} style={styles.drawerCloseBtn} hitSlop={{top:8,bottom:8,left:8,right:8}}>
+        <Icon name="close" size={22} color="#111827" />
+      </TouchableOpacity>
     </View>
 
     <View style={{ height: 6 }} />
@@ -976,7 +987,10 @@ const styles = StyleSheet.create({
   deviceMenuName: { fontSize: 14, fontWeight: '700', color: '#111827', marginBottom: 2 },
   deviceMenuPorts: { fontSize: 12, color: '#6B7280' },
 
-  drawerHeader: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8, flexDirection: 'row', alignItems: 'center' },
+  drawerHeader: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', justifyContent:'space-between' },
+  drawerHeaderLeft: { flexDirection: 'row', alignItems: 'center' },
+  drawerCloseBtn: { padding: 6, borderRadius: 999 },
+
   drawerBadge: { width: 28, height: 28, borderRadius: 8, backgroundColor:'#4A90E2', alignItems:'center', justifyContent:'center', marginRight: 8 },
   drawerTitle: { fontSize: 16, fontWeight: '800', color: '#111827' },
 
