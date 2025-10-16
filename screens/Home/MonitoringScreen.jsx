@@ -514,15 +514,16 @@ const closeDrawer = useCallback(() => {
   }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function WebModal({ visible, onRequestClose, children }) {
-    if (!visible) return null;
-    return (
-      <Pressable style={styles.modalOverlayAbs} onPress={onRequestClose}>
-        <View style={styles.modalContainer} onStartShouldSetResponder={() => true}>
-          {children}
-        </View>
-      </Pressable>
-    );
-  }
+  if (!visible) return null;
+  return (
+     <Pressable style={styles.modalOverlayAbs} onPress={onRequestClose}>
+      {/* inner Pressable chặn “bấm” truyền ra overlay, nhưng vẫn cho scroll */}
+     <Pressable onPress={() => {}} style={styles.modalContainer}>
+        {children}
+     </Pressable>
+     </Pressable>
+   );
+}
 
  function ModalContent({ t, headerName, modalPort, buildCheckoutUrl, openLink, saveQrPng, qrRef, onRequestClose }) {
     return (
@@ -558,9 +559,10 @@ const closeDrawer = useCallback(() => {
   nestedScrollEnabled
   showsVerticalScrollIndicator
   bounces={false}
-  maintainVisibleContentPosition={{ minIndexForVisible: 0 }} 
+   overScrollMode={Platform.OS === 'android' ? 'never' : undefined}
   scrollEventThrottle={16} 
   automaticallyAdjustContentInsets={false} 
+  contentInsetAdjustmentBehavior={Platform.OS === 'ios' ? 'never' : undefined}
         >
           {!!modalPort && (
             <View style={styles.modalContent}>
@@ -1131,7 +1133,7 @@ useEffect(() => {
           />
         ) : (
           <Pressable style={styles.modalOverlay} onPress={handleClosePortModal}>
-            <View style={styles.modalContainer} onStartShouldSetResponder={() => true}>
+            <Pressable onPress={() => {}} style={styles.modalContainer}>
               <ModalContent
                 t={t}
                 headerName={selectedDevice?.name || ''}
@@ -1142,7 +1144,7 @@ useEffect(() => {
                 qrRef={qrRef}
                 onRequestClose={handleClosePortModal}
               />
-            </View>
+             </Pressable>
           </Pressable>
         )}
       </ModalLike>
@@ -1361,7 +1363,7 @@ drawerHeaderLeft: {
 },
 
   modalScroll: { flexGrow: 0 },
-  modalScrollContent: { paddingBottom: 20 },
+  modalScrollContent: { paddingBottom: 28 },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
