@@ -1,5 +1,17 @@
+// screens/Home/ChangePassword.jsx (safe-area header, notch friendly)
 import React, { useCallback, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  ActivityIndicator,
+  StatusBar,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import SimpleHeader from '../../components/headers/SimpleHeader';
 import PasswordField from '../../components/form/PasswordField';
 import useLanguage from '../../Hooks/useLanguage';
@@ -20,11 +32,9 @@ export default function ChangePassword({ navigateToScreen, navigation }) {
     return true;
   }, [navigateToScreen]);
 
- 
   const { form, show, focus, loading, onChange, toggle, setFoc, submit } =
     useChangePassword({ t, onSuccess: goBackInfo });
 
- 
   useEffect(() => {
     const sub = navigation?.addListener?.('beforeRemove', (e) => {
       e.preventDefault();
@@ -35,9 +45,22 @@ export default function ChangePassword({ navigateToScreen, navigation }) {
 
   return (
     <View style={styles.container}>
-      <SimpleHeader title={t('cp_header')} onBack={goBackInfo} />
+      {/* StatusBar: Android cho nổi màu, iOS dùng safe-area */}
+      <StatusBar
+        translucent={false}
+        backgroundColor={PRIMARY}
+        barStyle="light-content"
+      />
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      {/* Header ăn safe-area top */}
+      <SafeAreaView edges={['top']} style={styles.headerSafe}>
+        <SimpleHeader title={t('cp_header')} onBack={goBackInfo} />
+      </SafeAreaView>
+
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
         <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
           <View style={styles.formCard}>
             <PasswordField
@@ -106,6 +129,12 @@ export default function ChangePassword({ navigateToScreen, navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f7f9fc' },
+
+  // Safe header nền đồng màu header thật (SimpleHeader)
+  headerSafe: {
+    backgroundColor: PRIMARY,
+  },
+
   body: { padding: 16, paddingBottom: 24 },
 
   formCard: {

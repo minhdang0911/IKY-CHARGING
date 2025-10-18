@@ -11,11 +11,17 @@ import {
   BackHandler,
   Platform,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import styles, { PRIMARY } from './CompanyStyles';
-// ✅ Bỏ NotificationContext
-// import { NotificationContext } from '../../App';
+
+// PNG icons (style tòa nhà iKY + website + chevron)
+import icBack from '../../assets/img/ic_back.png';
+import icHQ from '../../assets/img/IKY_white.png';                 
+import icOfficeHCM from '../../assets/img/IKY_HCM_white.png';  
+import icOfficeHN from '../../assets/img/IKY_HN_white.png';   
+import icWebsite from '../../assets/img/ic_website.png';     
+import icInfo from '../../assets/img/ic_infoo.png';         
+import icChevronRight from '../../assets/img/ic_chevron_rightttt.png';
 
 const LANG_KEY = 'app_language';
 
@@ -48,9 +54,6 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
   const [language, setLanguage] = useState('vi');
   const t = (k) => STRINGS[language][k] || k;
 
-  // 🔕 Không còn notifications context
-  const unreadCount = 0;
-
   useEffect(() => {
     (async () => {
       try {
@@ -59,11 +62,6 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
       } catch {}
     })();
   }, []);
-
-  const handleNotificationPress = () => {
-    // chỉ điều hướng, không đụng context
-    navigateToScreen && navigateToScreen('notification', { from: 'companyInfo' });
-  };
 
   const openMap = (address) => {
     const query = encodeURIComponent(address);
@@ -75,7 +73,6 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
     Linking.openURL(url).catch(() => {});
   };
 
-  // === BACK HANDLERS ===
   const handleBackPress = useCallback(() => {
     navigateToScreen && navigateToScreen('Information');
     return true;
@@ -95,10 +92,11 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
     return unsub;
   }, [navigation, handleBackPress]);
 
-  const InfoRow = ({ icon, label, value, onPress, isLink }) => (
+  // === ROW ===
+  const InfoRow = ({ iconSrc, label, value, onPress, isLink }) => (
     <TouchableOpacity activeOpacity={onPress ? 0.9 : 1} onPress={onPress} style={styles.row}>
       <View style={styles.rowIconBox}>
-        <Icon name={icon} size={18} color={PRIMARY} />
+        <Image source={iconSrc} style={{ width: 18, height: 18, tintColor: PRIMARY }} />
       </View>
       <View style={styles.rowTextWrap}>
         <Text style={styles.rowLabel}>{label}</Text>
@@ -110,7 +108,9 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
           {value}
         </Text>
       </View>
-      {onPress ? <Icon name="chevron-right" size={22} color="#98a2b3" /> : null}
+      {onPress ? (
+        <Image source={icChevronRight} style={{ width: 20, height: 20, tintColor: '#98a2b3' }} />
+      ) : null}
     </TouchableOpacity>
   );
 
@@ -119,19 +119,9 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
-          <Icon name="arrow-back" size={24} color="white" />
+          <Image source={icBack} style={{ width: 24, height: 24, tintColor: '#fff' }} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{t('headerTitle')}</Text>
-        {/* <TouchableOpacity style={styles.headerBtn} onPress={handleNotificationPress}>
-          <View style={styles.notificationContainer}>
-            <Icon name="notifications" size={22} color="#fff" />
-            {unreadCount > 0 && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
-              </View>
-            )}
-          </View>
-        </TouchableOpacity> */}
       </View>
 
       {/* Body */}
@@ -147,35 +137,35 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
         {/* Details */}
         <View style={styles.cardList}>
           <InfoRow
-            icon="business"
+            iconSrc={icHQ}
             label={t('hq')}
             value="13 Đường số 23A, P. Bình Trị Đông B, Q. Bình Tân, TP HCM"
             onPress={() => openMap('13 Đường số 23A, P. Bình Trị Đông B, Q. Bình Tân, TP HCM')}
           />
           <View style={styles.divider} />
           <InfoRow
-            icon="business"
+            iconSrc={icOfficeHCM}
             label={t('hcm')}
             value="38-40 Đường 21A, P. An Lạc, TP. Hồ Chí Minh"
             onPress={() => openMap('38-40 Đường 21A, P. An Lạc, TP. Hồ Chí Minh')}
           />
           <View style={styles.divider} />
           <InfoRow
-            icon="business"
+            iconSrc={icOfficeHN}
             label={t('hn')}
             value="80 Đường Hạ Yên Quyết, P. Yên Hòa, Q. Cầu Giấy, Hà Nội"
             onPress={() => openMap('80 Đường Hạ Yên Quyết, P. Yên Hòa, Q. Cầu Giấy, Hà Nội')}
           />
           <View style={styles.divider} />
           <InfoRow
-            icon="language"
+            iconSrc={icWebsite}
             label={t('website')}
             value="https://iky.vn"
             onPress={() => openWebsite('https://iky.vn')}
             isLink
           />
           <View style={styles.divider} />
-          <InfoRow icon="info" label={t('version')} value="1.127 Release" />
+          <InfoRow iconSrc={icInfo} label={t('version')} value="1.127 Release" />
         </View>
 
         {/* Close */}

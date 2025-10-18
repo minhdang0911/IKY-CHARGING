@@ -7,9 +7,11 @@ const BORDER  = '#e5e7eb';
 
 export default function FloatingTextField({
   value, onChangeText,
-  label, icon = 'person',
+  label, 
+  icon = 'person',  // fallback
+  leftSlot,         // ← THÊM PROP NÀY
   focused, onFocus, onBlur,
-  animValue, // Animated.Value 0 -> 1
+  animValue,
   inputRef, returnKeyType = 'next', onSubmitEditing,
   autoComplete = 'username', secureTextEntry = false, rightSlot,
 }) {
@@ -27,7 +29,14 @@ export default function FloatingTextField({
   return (
     <View style={[s.inputContainer, focused && s.inputFocused]}>
       <Animated.Text style={labelStyle}>{label}</Animated.Text>
-      <Icon name={icon} size={20} color={focused ? PRIMARY : '#9aa0a6'} style={s.inputIcon} />
+      
+      {/* Ưu tiên leftSlot, không có thì dùng icon */}
+      {leftSlot ? (
+        <View style={s.inputIcon}>{leftSlot}</View>
+      ) : (
+        <Icon name={icon} size={20} color={focused ? PRIMARY : '#9aa0a6'} style={s.inputIcon} />
+      )}
+      
       <TextInput
         ref={inputRef}
         style={s.input}
@@ -45,7 +54,6 @@ export default function FloatingTextField({
     </View>
   );
 }
-
 const s = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff',

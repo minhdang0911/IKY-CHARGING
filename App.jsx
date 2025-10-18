@@ -1,3 +1,4 @@
+// App.js
 import React, { useEffect, useState, useRef } from 'react';
 import {
   StatusBar,
@@ -51,14 +52,14 @@ const K_EXPIRES_AT = 'expires_at';
 const K_USERNAME = 'username';
 const K_USER_OID = 'user_oid';
 
-// ===== Auto refresh =====
+// ===== Auto refresh 2 phút =====
 const LOOP_MS = 40 * 60 * 1000; 
 const MIN_GAP_MS = 20 * 60 * 1000;
 
 let refreshTimer = null;
 let refreshInFlight = null;
 let lastRefreshAt = 0;
-let loopArmed = false;  
+let loopArmed = false;
 
 function clearRefreshLoop() {
   if (refreshTimer) {
@@ -77,6 +78,7 @@ async function hardLogout(navigateToScreen) {
   navigateToScreen('Login');
 }
 
+// helper: ngủ ms
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function doRefreshToken(navigateToScreen, { force = false } = {}) {
@@ -91,14 +93,18 @@ async function doRefreshToken(navigateToScreen, { force = false } = {}) {
     if (!refresh || !access) { refreshInFlight = null; return; }
 
     let attempt = 0;
-    let backoff = 2000;
+    let backoff = 2000; // 2s → 4s → 8s (max 30s)
 
     while (true) {
       try {
+        console.log('🔄 Refreshing access token… (attempt', attempt + 1, ')');
+        // ✅ truyền cả refresh + access vào
         const data = await refreshAccessToken(refresh, access);
+
         if (!data || (!data.accessToken && !data.refreshToken)) {
           throw new Error('Bad refresh payload');
         }
+
         const pairs = [
           [K_ACCESS, data.accessToken || ''],
           [K_REFRESH, data.refreshToken || refresh],
@@ -107,21 +113,34 @@ async function doRefreshToken(navigateToScreen, { force = false } = {}) {
         await AsyncStorage.multiSet(pairs);
 
         lastRefreshAt = Date.now();
-        if (data.accessToken) { try { sseManager.updateToken(data.accessToken); } catch {} }
-        break;
+        console.log('✅ Refreshed OK.');
+        if (data.accessToken) {
+          try { sseManager.updateToken(data.accessToken); } catch {}
+        }
+        break; // DONE
       } catch (e) {
         const status = e?.response?.status;
         const body = e?.response?.data;
         const msg = status ? `HTTP ${status} ${JSON.stringify(body || {})}` : (e?.message || String(e));
+        console.log('❌ Refresh failed:', msg);
+
+        // 400/401/invalid -> logout
         const lower = msg.toLowerCase();
         const isAuthErr = status === 400 || status === 401
           || /invalid_grant|invalid refresh|expired|unauthorized|invalid_token/.test(lower);
+
         if (isAuthErr) {
+          console.log('🚪 Refresh token invalid → force logout');
           await hardLogout(navigateToScreen);
           break;
         }
+
+        // 5xx / network → retry với backoff, giới hạn 3 lần
         attempt += 1;
-        if (attempt >= 3) break;
+        if (attempt >= 3) {
+          console.log('⏭️ Give up retry for now, will try again on next loop.');
+          break;
+        }
         await sleep(backoff);
         backoff = Math.min(backoff * 2, 30000);
       }
@@ -140,6 +159,7 @@ function startRefreshLoopOnce(navigateToScreen) {
     try { await doRefreshToken(navigateToScreen); } catch {}
   }, LOOP_MS);
   loopArmed = true;
+  console.log(`🕒 Auto-refresh started: every ${Math.round(LOOP_MS / 60000)} minutes`);
 }
 
 const SCREEN_TO_TAB = {
@@ -193,15 +213,20 @@ export default function App() {
     return () => { showSub.remove(); hideSub.remove(); };
   }, []);
 
-  // giữ navigateToScreen mới nhất cho SSE
+  // NEW: cờ ẩn tab từ child (Monitoring → Drawer)
+  const [tabHidden, setTabHidden] = useState(false);
+
+  // Giữ navigateToScreen mới nhất trong ref để handler SSE không bị recreate
   const navRef = useRef(navigateToScreen);
   useEffect(() => { navRef.current = navigateToScreen; }, [navigateToScreen]);
 
+  // SSE: token die → logout + Login (gắn 1 lần)
   const sseHandlerAttached = useRef(false);
   useEffect(() => {
     if (sseHandlerAttached.current) return;
     sseHandlerAttached.current = true;
     sseManager.setAuthInvalidHandler(async () => {
+      console.log('[AUTH] SSE invalid/expired → force logout');
       await hardLogout(navRef.current);
     });
     return () => {
@@ -227,6 +252,7 @@ export default function App() {
           const expiresAt = parseInt(await AsyncStorage.getItem(K_EXPIRES_AT), 10) || 0;
           const now = Date.now();
           if (!expiresAt || expiresAt - now < 10 * 60 * 1000) {
+            // chỉ force refresh nếu sắp hết hạn (<10 phút)
             try { await doRefreshToken(navigateToScreen, { force: true }); } catch {}
           }
         } else {
@@ -240,11 +266,11 @@ export default function App() {
     })();
   }, [navigateToScreen, restoreSession]);
 
-  // AppState
+  // AppState: foreground → refresh ngay; background → dừng loop
   useEffect(() => {
     const sub = AppState.addEventListener('change', async (state) => {
       if (state === 'active') {
-        try { await doRefreshToken(navigateToScreen, { force: false }); } catch {}
+        try { await doRefreshToken(navigateToScreen, { force: false }); console.log('⏱ Last refresh:', new Date(lastRefreshAt).toLocaleTimeString()); } catch {}
         startRefreshLoopOnce(navigateToScreen);
       } else {
         clearRefreshLoop();
@@ -282,10 +308,12 @@ export default function App() {
     }
   };
 
-  // Ẩn tab khi mở Drawer (từ child)
-  const [tabHiddenExtra, setTabHiddenExtra] = useState(false);
-
   const screensWithoutBottomNav = ['Login','ForgotPassword','forgotStep2','forgotStep3','changeInfo','AddDevices'];
+
+  // NEW: rời Monitoring thì mở lại tab cho chắc
+  useEffect(() => {
+    if (currentScreen !== 'Monitoring') setTabHidden(false);
+  }, [currentScreen]);
 
   const renderCurrentScreen = () => {
     switch (currentScreen) {
@@ -297,7 +325,7 @@ export default function App() {
         <MonitoringScreen
           logout={handleLogout}
           navigateToScreen={navigateToScreen}
-          setTabHidden={setTabHiddenExtra}
+          setTabHidden={setTabHidden} // <<< truyền xuống để Drawer điều khiển tab
         />
       );
       case 'devicesInfo': return <DevicesInfo logout={handleLogout} navigateToScreen={navigateToScreen} screenData={screenData} />;
@@ -329,18 +357,20 @@ export default function App() {
   }
 
   const currentTab = SCREEN_TO_TAB[currentScreen] || 'Monitoring';
-  const hideTabBase = kbVisible || screensWithoutBottomNav.includes(currentScreen);
-  const hideTab = hideTabBase || tabHiddenExtra;
+  const hideTab = kbVisible || screensWithoutBottomNav.includes(currentScreen);
+  const finalHide = hideTab || tabHidden; // NEW: cộng thêm cờ từ Drawer
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1e88e5" />
       {renderCurrentScreen()}
-      <BottomTabNavigation
-        currentScreen={currentTab}
-        navigateToScreen={navigateToScreen}
-        hidden={hideTab}
-      />
+      {!finalHide && (
+        <BottomTabNavigation
+          currentScreen={currentTab}
+          navigateToScreen={navigateToScreen}
+        />
+      )}
+
       {busy.active && (
         <View style={styles.overlay}>
           <ActivityIndicator size="large" color="#fff" />

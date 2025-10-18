@@ -1,19 +1,31 @@
-// screens/Home/HistoryExtend.jsx
+// screens/Home/HistoryExtend.jsx (PNG icons version)
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SafeAreaView, View, Text, StyleSheet, TouchableOpacity, FlatList,
-  RefreshControl, Platform, Modal, Pressable, BackHandler, PanResponder,
+  RefreshControl, Platform, Modal, Pressable, BackHandler, PanResponder, Image
 } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getOrders, getDevices } from '../../apis/devices';
 import SearchBar from '../../components/SearchBar';
 import PaginationControls from '../../components/PaginationControls';
 import EVChargingLoader from '../../components/EVChargingLoader';
 
+// local PNG icons
+import icBack from '../../assets/img/ic_back.png';
+import icExpandMore from '../../assets/img/ic_expand_more.png';
+import icCheck from '../../assets/img/ic_check.png';
+import icReceipt from '../../assets/img/ic_receipt.png';
+import icStore from '../../assets/img/ic_store.png';
+import icCategory from '../../assets/img/ic_category.png';
+import icSchedule from '../../assets/img/ic_schedule.png';
+import icWallet from '../../assets/img/ic_wallet.png';
+import icEvent from '../../assets/img/ic_event.png';
+import icHourglass from '../../assets/img/ic_hourglass.png';
+import icCalendarMonth from '../../assets/img/ic_calendar_month.png';
+
 /* ================= DEBUG ================= */
 const DEBUG = true;
-const dlog = () => {};  
+const dlog = () => {};
 
 /* ================= helpers ================= */
 async function getAccessTokenSafe() {
@@ -77,7 +89,7 @@ function parseMonthLabel(s) {
   return { m, y };
 }
 
-/* ================ Dropdown custom ================ */
+/* ================ Dropdown custom (PNG) ================ */
 function Dropdown({ label, value, options, onChange, minWidth = 160 }) {
   const [open, setOpen] = useState(false);
   const selected = options.find((o) => o.value === value);
@@ -100,7 +112,7 @@ function Dropdown({ label, value, options, onChange, minWidth = 160 }) {
         <Text style={styles.dropdownText}>
           {label}: <Text style={{ fontWeight: '800', color: '#0f172a' }}>{selected?.label}</Text>
         </Text>
-        <Icon name="expand-more" size={20} color="#0ea5e9" />
+        <Image source={icExpandMore} style={{ width: 18, height: 18, tintColor: '#0ea5e9' }} />
       </TouchableOpacity>
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
@@ -115,7 +127,7 @@ function Dropdown({ label, value, options, onChange, minWidth = 160 }) {
                   onPress={() => { dlog(`Dropdown<${label}> select ->`, opt); onChange(opt.value); setOpen(false); }}
                 >
                   <Text style={[styles.optionText, active && { color: '#0369a1', fontWeight: '800' }]}>{opt.label}</Text>
-                  {active && <Icon name="check" size={18} color="#0369a1" />}
+                  {active && <Image source={icCheck} style={{ width: 18, height: 18, tintColor: '#0369a1' }} />}
                 </TouchableOpacity>
               );
             })}
@@ -218,35 +230,32 @@ export default function HistoryExtend({ navigateToScreen }) {
 
       setSelectedMonth(monthLabel);
 
-    const buildOptsFrom = (list) => {
-  // đếm số lần xuất hiện của name để biết có trùng không
-  const nameCount = {};
-  (list || []).forEach(d => {
-    const name = String(d?.name || '').trim();
-    if (name) nameCount[name] = (nameCount[name] || 0) + 1;
-  });
+      const buildOptsFrom = (list) => {
+        const nameCount = {};
+        (list || []).forEach(d => {
+          const name = String(d?.name || '').trim();
+          if (name) nameCount[name] = (nameCount[name] || 0) + 1;
+        });
 
-  const opts = [{ label: 'Tất cả', value: 'all' }].concat(
-    (list || []).map(d => {
-      const name = String(d?.name || '').trim();
-      const code = String(d?.code ?? d?.device_code ?? d?.id ?? d?._id ?? '').trim();
+        const opts = [{ label: 'Tất cả', value: 'all' }].concat(
+          (list || []).map(d => {
+            const name = String(d?.name || '').trim();
+            const code = String(d?.code ?? d?.device_code ?? d?.id ?? d?._id ?? '').trim();
 
-      // label: chỉ hiện tên; nếu tên bị trùng => kèm (#code) để phân biệt
-      let label;
-      if (name) {
-        label = nameCount[name] > 1 ? `${name} (#${code || '-'})` : name;
-      } else {
-        // không có tên thì mới đành show code
-        label = code || '(không tên)';
-      }
+            let label;
+            if (name) {
+              label = nameCount[name] > 1 ? `${name} (#${code || '-'})` : name;
+            } else {
+              label = code || '(không tên)';
+            }
 
-      return { label, value: code || 'all' }; // VALUE = code (để filter chuẩn)
-    })
-  );
+            return { label, value: code || 'all' };
+          })
+        );
 
-  dlog('buildOptsFrom ->', opts.slice(0, 6)); // optional log
-  return opts;
-};
+        dlog('buildOptsFrom ->', opts.slice(0, 6));
+        return opts;
+      };
 
       if (snapshot && snapshot.length) {
         dlog('hydrate: use SNAPSHOT devices.');
@@ -288,7 +297,6 @@ export default function HistoryExtend({ navigateToScreen }) {
         }
       }
 
-      // trả về cho init quyết định mode
       return { monthLabel, preselectedCode: preselectedCode || 'all' };
     } catch (e) {
       dlog('hydrate error:', e?.message || e);
@@ -342,15 +350,12 @@ export default function HistoryExtend({ navigateToScreen }) {
       if (!totalPages || Number.isNaN(totalPages)) totalPages = 1;
 
       for (let p = 2; p <= totalPages; p += 1) {
-        // eslint-disable-next-line no-await-in-loop
         const chunk = await getOrders(token, { page: p, limit: 1000 });
         const arr = Array.isArray(chunk?.data) ? chunk.data : (Array.isArray(chunk) ? chunk : []);
         list = list.concat(arr);
       }
 
       setAllItems(list);
-      const uniqCodes = Array.from(new Set(list.map(getOrderDevCode))).slice(0, 10);
-      dlog('fetchAllNoParams total=', list.length, 'sampleDevCodes=', uniqCodes);
     } catch (e) {
       console.warn('fetchAllNoParams error:', e?.message || e);
       setAllItems([]);
@@ -364,38 +369,31 @@ export default function HistoryExtend({ navigateToScreen }) {
     (async () => {
       const { monthLabel, preselectedCode } = await hydratePrefAndDevices();
       const shouldFrontend = !!monthLabel || (preselectedCode && preselectedCode !== 'all');
-      dlog('init decide:', { monthLabel, preselectedCode, shouldFrontend });
 
       if (shouldFrontend) {
         setMode('frontend'); setFePage(1);
-        dlog('init: mode=frontend');
         await fetchAllNoParams({ showSpinner: true });
       } else {
         setMode('backend'); setApiPage(1);
-        dlog('init: mode=backend');
         await fetchBackendPage(1, { showSpinner: true });
       }
 
-      setBooted(true); // <-- unlock các effect khác
+      setBooted(true);
     })();
   }, [hydratePrefAndDevices, fetchBackendPage, fetchAllNoParams]);
 
-  // Recompute mode khi q/filters đổi (chỉ sau khi booted)
   useEffect(() => {
     if (!booted) return;
-    dlog('mode decision: qPresent=', qPresent, 'filtersActive=', filtersActive);
-    if (qPresent) setMode('backend');
-    else if (filtersActive) setMode('frontend');
+    if (q.trim()) setMode('backend');
+    else if ((deviceCode !== 'all') || (status !== 'all') || (range !== 'all') || !!selectedMonth) setMode('frontend');
     else setMode('backend');
-  }, [booted, qPresent, filtersActive]);
+  }, [booted, q, deviceCode, status, range, selectedMonth]);
 
-  // Khi filters đổi, fetch tương ứng (chỉ sau khi booted)
   useEffect(() => {
     (async () => {
       if (!booted) return;
-      dlog('filters changed -> deviceCode=', deviceCode, 'status=', status, 'range=', range, 'month=', selectedMonth);
-      if (qPresent) return;
-      if (filtersActive) {
+      if (q.trim()) return;
+      if ((deviceCode !== 'all') || (status !== 'all') || (range !== 'all') || !!selectedMonth) {
         if (modeRef.current !== 'frontend') setMode('frontend');
         setFePage(1);
         await fetchAllNoParams({ showSpinner: true });
@@ -405,13 +403,11 @@ export default function HistoryExtend({ navigateToScreen }) {
         await fetchBackendPage(1, { showSpinner: true });
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booted, deviceCode, status, range, selectedMonth]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      dlog('pull-to-refresh');
       await hydratePrefAndDevices();
       if (modeRef.current === 'backend') {
         await fetchBackendPage(apiPageRef.current, { showSpinner: false });
@@ -448,23 +444,10 @@ export default function HistoryExtend({ navigateToScreen }) {
       return matchDevice && matchStatus && matchRange && matchMonth;
     });
 
-    if (DEBUG) {
-      const allLen = list.length, resLen = result.length;
-      const first3Before = list.slice(0, 3).map(o => ({ orderId: o?.orderId, code: getOrderDevCode(o), status: o?.status }));
-      const first3After  = result.slice(0, 3).map(o => ({ orderId: o?.orderId, code: getOrderDevCode(o), status: o?.status }));
-      const uniqCodesBefore = Array.from(new Set(list.map(getOrderDevCode)));
-      const uniqCodesAfter  = Array.from(new Set(result.map(getOrderDevCode)));
-      dlog('FILTER SUMMARY', {
-        mode, allLen, resLen, deviceCode, status, range, month: selectedMonth,
-        uniqCodesBefore: uniqCodesBefore.slice(0, 10),
-        uniqCodesAfter: uniqCodesAfter.slice(0, 10),
-        sampleBefore: first3Before, sampleAfter: first3After
-      });
-    }
     return result;
   }, [mode, items, allItems, deviceCode, status, range, selectedMonth]);
 
-  // Tính trang & data hiển thị
+  // pagination
   const totalPagesRender = useMemo(() => {
     if (mode === 'backend') return Math.max(1, apiTotalPages);
     return Math.max(1, Math.ceil((filteredFE?.length || 0) / FE_LIMIT));
@@ -478,7 +461,6 @@ export default function HistoryExtend({ navigateToScreen }) {
     return filteredFE.slice(start, start + FE_LIMIT);
   }, [mode, items, filteredFE, fePage]);
 
-  // Chuyển trang
   const handlePrev = useCallback(async () => {
     if (modeRef.current === 'backend') {
       const nextPage = Math.max(1, apiPageRef.current - 1);
@@ -501,7 +483,6 @@ export default function HistoryExtend({ navigateToScreen }) {
     }
   }, [fetchBackendPage, totalPagesRender]);
 
-  // ===== Render item =====
   const renderItem = ({ item }) => {
     const dev = item?.device_id || {};
     const agent = item?.agent_id || {};
@@ -520,28 +501,40 @@ export default function HistoryExtend({ navigateToScreen }) {
           </View>
 
           <View style={[styles.statusPill, { backgroundColor: `${color}1A`, borderColor: color }]}>
-            <Icon name="receipt-long" size={14} color={color} />
+            <Image source={icReceipt} style={{ width: 14, height: 14, tintColor: color, marginRight: 4 }} />
             <Text style={[styles.statusText, { color }]}>{viStatus(st)}</Text>
           </View>
         </View>
 
-        <View style={styles.row}><Icon name="store" size={18} color="#64748b" style={{ marginRight: 6 }} />
-          <Text style={styles.k}>Đại lý</Text><Text style={styles.v}>{agent?.name || '—'}</Text></View>
+        <View style={styles.row}>
+          <Image source={icStore} style={{ width: 18, height: 18, tintColor: '#64748b', marginRight: 6 }} />
+          <Text style={styles.k}>Đại lý</Text><Text style={styles.v}>{agent?.name || '—'}</Text>
+        </View>
 
-        <View style={styles.row}><Icon name="category" size={18} color="#64748b" style={{ marginRight: 6 }} />
-          <Text style={styles.k}>Gói</Text><Text style={styles.v}>{plan?.name || '—'}</Text></View>
+        <View style={styles.row}>
+          <Image source={icCategory} style={{ width: 18, height: 18, tintColor: '#64748b', marginRight: 6 }} />
+          <Text style={styles.k}>Gói</Text><Text style={styles.v}>{plan?.name || '—'}</Text>
+        </View>
 
-        <View style={styles.row}><Icon name="schedule" size={18} color="#64748b" style={{ marginRight: 6 }} />
-          <Text style={styles.k}>Thời lượng</Text><Text style={styles.v}>{plan?.duration_minutes ? `${plan.duration_minutes} phút` : '—'}</Text></View>
+        <View style={styles.row}>
+          <Image source={icSchedule} style={{ width: 18, height: 18, tintColor: '#64748b', marginRight: 6 }} />
+          <Text style={styles.k}>Thời lượng</Text><Text style={styles.v}>{plan?.duration_minutes ? `${plan.duration_minutes} phút` : '—'}</Text>
+        </View>
 
-        <View style={styles.row}><Icon name="payments" size={18} color="#64748b" style={{ marginRight: 6 }} />
-          <Text style={styles.k}>Số tiền</Text><Text style={styles.v}>{fmtMoney(item?.amount)}</Text></View>
+        <View style={styles.row}>
+          <Image source={icWallet} style={{ width: 18, height: 18, tintColor: '#64748b', marginRight: 6 }} />
+          <Text style={styles.k}>Số tiền</Text><Text style={styles.v}>{fmtMoney(item?.amount)}</Text>
+        </View>
 
-        <View style={styles.row}><Icon name="account-balance-wallet" size={18} color="#64748b" style={{ marginRight: 6 }} />
-          <Text style={styles.k}>Phương thức</Text><Text style={styles.v}>{String(item?.payment_method || '').toUpperCase() || '—'}</Text></View>
+        <View style={styles.row}>
+          <Image source={icWallet} style={{ width: 18, height: 18, tintColor: '#64748b', marginRight: 6 }} />
+          <Text style={styles.k}>Phương thức</Text><Text style={styles.v}>{String(item?.payment_method || '').toUpperCase() || '—'}</Text>
+        </View>
 
-        <View style={styles.row}><Icon name="event" size={18} color="#64748b" style={{ marginRight: 6 }} />
-          <Text style={styles.k}>Ngày tạo</Text><Text style={styles.v}>{fmtDate(item?.createdAt)}</Text></View>
+        <View style={styles.row}>
+          <Image source={icEvent} style={{ width: 18, height: 18, tintColor: '#64748b', marginRight: 6 }} />
+          <Text style={styles.k}>Ngày tạo</Text><Text style={styles.v}>{fmtDate(item?.createdAt)}</Text>
+        </View>
       </TouchableOpacity>
     );
   };
@@ -549,7 +542,9 @@ export default function HistoryExtend({ navigateToScreen }) {
   return (
     <SafeAreaView style={styles.container} {...panResponder.panHandlers}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={goBack} style={styles.backButton}><Icon name="arrow-back" size={24} color="#fff" /></TouchableOpacity>
+        <TouchableOpacity onPress={goBack} style={{ padding: 6 }}>
+          <Image source={icBack} style={{ width: 24, height: 24, tintColor: '#fff' }} />
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Lịch sử đơn hàng</Text>
         <View style={{ width: 24 }} />
       </View>
@@ -560,11 +555,10 @@ export default function HistoryExtend({ navigateToScreen }) {
             <TouchableOpacity
               style={[styles.monthChip, mode === 'frontend' && { backgroundColor: '#c7d2fe' }]}
               onPress={async () => {
-                dlog('handleToggleFrontMode. selectedMonth=', selectedMonth, 'filtersActive=', filtersActive, 'qPresent=', qPresent);
                 if (selectedMonth) { setMode('frontend'); setFePage(1); await fetchAllNoParams({ showSpinner: true }); }
               }}
             >
-              <Icon name="calendar-month" size={16} color="#1d4ed8" />
+              <Image source={icCalendarMonth} style={{ width: 16, height: 16, tintColor: '#1d4ed8', marginRight: 6 }} />
               <Text style={styles.monthChipText}>{mode === 'frontend' ? `Đang lọc: ${selectedMonth}` : `Chỉ xem tháng: ${selectedMonth}`}</Text>
             </TouchableOpacity>
           </View>
@@ -575,7 +569,7 @@ export default function HistoryExtend({ navigateToScreen }) {
           value={q}
           onChange={(text) => { setQ(text); setApiPage(1); }}
           onClear={() => { setQ(''); setApiPage(1); }}
-          onSubmit={async () => { dlog('handleSearchSubmit q=', q); setMode('backend'); setApiPage(1); await fetchBackendPage(1, { showSpinner: true }); }}
+          onSubmit={async () => { setMode('backend'); setApiPage(1); await fetchBackendPage(1, { showSpinner: true }); }}
         />
 
         <View style={styles.filterRow}>
@@ -583,15 +577,13 @@ export default function HistoryExtend({ navigateToScreen }) {
             label="Thiết bị"
             value={deviceCode}
             onChange={(v) => {
-              dlog('onChange deviceCode ->', v, '(prev=', deviceCode, ')');
               setDeviceCode(v);
               (async () => {
                 try {
                   const s = await AsyncStorage.getItem(K_HISTORY_PREF);
                   const prev = s ? JSON.parse(s) : {};
                   await AsyncStorage.setItem(K_HISTORY_PREF, JSON.stringify({ ...prev, preselectedDeviceCode: v || 'all' }));
-                  dlog('persist preselectedDeviceCode =', v || 'all');
-                } catch (e) { dlog('persist preselectedDeviceCode error:', e?.message || e); }
+                } catch (e) {}
               })();
             }}
             options={deviceOptions}
@@ -601,7 +593,7 @@ export default function HistoryExtend({ navigateToScreen }) {
           <Dropdown
             label="Trạng thái"
             value={status}
-            onChange={(v) => { dlog('onChange status ->', v); setStatus(v); }}
+            onChange={(v) => { setStatus(v); }}
             options={[
               { label: 'Tất cả', value: 'all' },
               { label: 'Đang xử lý', value: 'pending' },
@@ -615,7 +607,7 @@ export default function HistoryExtend({ navigateToScreen }) {
           <Dropdown
             label="Khoảng thời gian"
             value={range}
-            onChange={(v) => { dlog('onChange range ->', v); setRange(v); }}
+            onChange={(v) => { setRange(v); }}
             options={[
               { label: 'Tất cả', value: 'all' },
               { label: '7 ngày', value: '7d' },
@@ -626,7 +618,9 @@ export default function HistoryExtend({ navigateToScreen }) {
       </View>
 
       {loadingHard ? (
-        <View style={styles.center}><EVChargingLoader message="Đang tải dữ liệu đơn hàng…" /></View>
+        <View style={styles.center}>
+          <EVChargingLoader message="Đang tải dữ liệu đơn hàng…" />
+        </View>
       ) : (
         <>
           <FlatList
@@ -636,10 +630,30 @@ export default function HistoryExtend({ navigateToScreen }) {
             ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
             contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-            ListEmptyComponent={<View style={styles.emptyWrap}><Icon name="hourglass-empty" size={28} color="#94a3b8" /><Text style={styles.emptyText}>Không có đơn hàng phù hợp</Text></View>}
+            ListEmptyComponent={
+              <View style={styles.emptyWrap}>
+                <Image source={icHourglass} style={{ width: 28, height: 28, tintColor: '#94a3b8' }} />
+                <Text style={styles.emptyText}>Không có đơn hàng phù hợp</Text>
+              </View>
+            }
           />
 
-          <PaginationControls page={currentPage} totalPages={totalPagesRender} onPrev={handlePrev} onNext={handleNext} />
+          <PaginationControls
+  page={currentPage}
+  totalPages={totalPagesRender}
+  onPrev={handlePrev}
+  onNext={handleNext}
+  showGoto
+  onJump={(n) => {
+    if (modeRef.current === 'backend') {
+      setApiPage(n);
+      apiPageRef.current = n;
+      fetchBackendPage(n, { showSpinner: true });
+    } else {
+      setFePage(n);
+    }
+  }}
+/>
         </>
       )}
     </SafeAreaView>
@@ -654,7 +668,7 @@ const styles = StyleSheet.create({
   headerTitle: { flex: 1, color: '#fff', fontSize: 18, fontWeight: '700' },
   filterBar: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 0 },
   monthChipRow: { marginBottom: 8 },
-  monthChip: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: '#e0e7ff', borderWidth: 1, borderColor: '#c7d2fe', gap: 6 },
+  monthChip: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 999, backgroundColor: '#e0e7ff', borderWidth: 1, borderColor: '#c7d2fe' },
   monthChipText: { color: '#1d4ed8', fontWeight: '800' },
   filterRow: { flexDirection: 'row', gap: 10, marginTop: 10, flexWrap: 'wrap' },
   dropdownBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: '#e2e8f0', justifyContent: 'space-between' },
@@ -670,10 +684,11 @@ const styles = StyleSheet.create({
   sub: { marginTop: 2, fontSize: 12, color: '#6b7280' },
   bold: { fontWeight: '800', color: '#111827' },
   statusPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, borderWidth: 1, marginLeft: 8 },
-  statusText: { fontSize: 12, fontWeight: '700', marginLeft: 4 },
+  statusText: { fontSize: 12, fontWeight: '700' },
   row: { flexDirection: 'row', alignItems: 'center', paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#eee' },
   k: { flex: 1, fontSize: 13, color: '#6b7280' },
   v: { fontSize: 13, fontWeight: '700', color: '#111827' },
   emptyWrap: { padding: 24, alignItems: 'center' },
   emptyText: { marginTop: 8, color: '#94a3b8', fontWeight: '600' },
 });
+

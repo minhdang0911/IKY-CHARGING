@@ -1,14 +1,30 @@
 // screens/.../DeviceList.jsx
+// 🔧 ICON PNGs cần có (đặt trong assets/img/):
+//  - ic_search.png (24x24), ic_close.png (20x20)
+//  - ic_grid.png (20x20), ic_wifi.png (20x20), ic_wifi_off.png (20x20)
+//  - ic_bolt.png (20x20), ic_tune.png (20x20), ic_history.png (20x20)
+
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput,
-  RefreshControl, Platform,
+  RefreshControl, Platform, Image, StatusBar,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+
 import { getDevices, getExtendHistory } from '../../apis/devices';
 import { showMessage } from '../../components/Toast/Toast';
-import PortCardSkeleton from '../../components/Skeletons/PortCardSkeleton';  
+import PortCardSkeleton from '../../components/Skeletons/PortCardSkeleton';
+
+// ---- local PNG icons
+import icSearch from '../../assets/img/ic_search.png';
+import icClose from '../../assets/img/ic_close.png';
+import icGrid from '../../assets/img/ic_grid.png';
+import icWifi from '../../assets/img/ic_wifi.png';
+import icWifiOff from '../../assets/img/ic_wifi_off.png';
+import icBolt from '../../assets/img/ic_bolt.png';
+import icTune from '../../assets/img/ic_tune.png';
+import icHistory from '../../assets/img/ic_history.png';
 
 const LANG_KEY = 'app_language';
 const K_DEVICES = 'ev_devices_cache_v1';
@@ -71,6 +87,10 @@ const saneTemp = (t) => {
   return Math.round(n);
 };
 
+function IconImg({ src, size = 18, style }) {
+  return <Image source={src} style={[{ width: size, height: size, resizeMode: 'contain' }, style]} />;
+}
+
 export default function DeviceList({ navigateToScreen }) {
   const mounted = useRef(true);
   const [lang, setLang] = useState('vi');
@@ -80,13 +100,13 @@ export default function DeviceList({ navigateToScreen }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const [refreshing, setRefreshing] = useState(false);
-
-  // 👇 NEW: loading lần đầu để show skeleton
   const [loading, setLoading] = useState(true);
 
   // Front-end pagination
   const [page, setPage] = useState(1);
   const limit = 10;
+
+  const insets = useSafeAreaInsets();
 
   useEffect(() => () => { mounted.current = false; }, []);
   useEffect(() => { (async()=>{ try{ const s=await AsyncStorage.getItem(LANG_KEY); if(s) setLang(s);}catch{} })(); }, []);
@@ -116,12 +136,12 @@ export default function DeviceList({ navigateToScreen }) {
     }
   }, []);
 
-  // 👇 chạy boot: load cache (nếu có) + fetch API rồi tắt loading để skeleton biến mất
+  // boot
   useEffect(() => {
     (async()=>{
       setLoading(true);
-      await loadCache();        // có cache thì hiện ngay data cũ (skeleton chỉ chớp nhẹ)
-      await fetchList(false);   // gọi API cập nhật
+      await loadCache();
+      await fetchList(false);
       if (mounted.current) setLoading(false);
     })();
   }, [loadCache, fetchList]);
@@ -133,38 +153,35 @@ export default function DeviceList({ navigateToScreen }) {
   }, [fetchList]);
 
   // Chuẩn hoá data
- const items = useMemo(() => {
-  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
-  return (raw || []).map((d) => {
-    const ports = Array.isArray(d?.ports) ? d.ports : [];
-    const lastHb = d?.lastHeartbeat ? new Date(d.lastHeartbeat) : null;
-    const _id = d?._id || d?.id || d?.device_id || d?.device_code;
+  const items = useMemo(() => {
+    const locale = lang === 'en' ? 'en-US' : 'vi-VN';
+    return (raw || []).map((d) => {
+      const ports = Array.isArray(d?.ports) ? d.ports : [];
+      const lastHb = d?.lastHeartbeat ? new Date(d.lastHeartbeat) : null;
+      const _id = d?._id || d?.id || d?.device_id || d?.device_code;
 
-    return {
-      _id,
-      id: _id,
-      code: d?.device_code || '—',
-      name: d?.name || '—',
-      location: d?.location || '',
-      status: (d?.status || '').toLowerCase(),
-      fw: d?.fw_version || '—',
-      ports: ports.map(p => ({ n: p.portNumber, status: (p.status||'').toLowerCase() })),
-      portsCount: ports.length,
-      lastHbStr: (lastHb && !isNaN(lastHb)) ? lastHb.toLocaleString(locale) : '—',
-      voltage: d?.voltage,
-      temp: saneTemp(d?.temperature),
-      createdAt: d?.createdAt ? new Date(d.createdAt) : null,   // 👈 thêm field này
-      raw: d,
-    };
-  })
-  // 👇 sort theo createdAt cũ → mới
-  .sort((a, b) => {
-    const ta = a.createdAt ? a.createdAt.getTime() : 0;
-    const tb = b.createdAt ? b.createdAt.getTime() : 0;
-    return ta - tb;
-  });
-}, [raw, lang]);
-
+      return {
+        _id,
+        id: _id,
+        code: d?.device_code || '—',
+        name: d?.name || '—',
+        location: d?.location || '',
+        status: (d?.status || '').toLowerCase(),
+        fw: d?.fw_version || '—',
+        ports: ports.map(p => ({ n: p.portNumber, status: (p.status||'').toLowerCase() })),
+        portsCount: ports.length,
+        lastHbStr: (lastHb && !isNaN(lastHb)) ? lastHb.toLocaleString(locale) : '—',
+        voltage: d?.voltage,
+        temp: saneTemp(d?.temperature),
+        createdAt: d?.createdAt ? new Date(d.createdAt) : null,
+        raw: d,
+      };
+    }).sort((a, b) => {
+      const ta = a.createdAt ? a.createdAt.getTime() : 0;
+      const tb = b.createdAt ? b.createdAt.getTime() : 0;
+      return ta - tb;
+    });
+  }, [raw, lang]);
 
   // Filter
   const filtered = useMemo(() => {
@@ -218,7 +235,11 @@ export default function DeviceList({ navigateToScreen }) {
         activeOpacity={0.9}
       >
         {!!icon && (
-          <Icon name={icon} size={14} color={active ? '#fff' : '#3478F6'} style={{ marginRight: 6 }} />
+          <IconImg
+            src={icon}
+            size={14}
+            style={{ marginRight: 6, tintColor: active ? '#fff' : '#3478F6' }}
+          />
         )}
         <Text style={[styles.chipText, active && styles.chipTextActive]} numberOfLines={1}>
           {label}
@@ -251,145 +272,159 @@ export default function DeviceList({ navigateToScreen }) {
     goExtend(it.raw);
   };
 
+  const HEADER_BG = '#4A90E2';
+
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>{t('header')}</Text>
-      </View>
+    <SafeAreaView style={styles.safeRoot} edges={['bottom']}>
+      {/* Color the status bar area to match header and avoid notch overlap */}
+      <View style={{ height: insets.top, backgroundColor: HEADER_BG }} />
+      <StatusBar barStyle="light-content" />
 
-      {/* Search */}
-      <View style={styles.searchRow}>
-        <View style={styles.searchBox}>
-          <Icon name="search" size={20} color="#9DB7E8" />
-          <TextInput
-            style={styles.searchInput}
-            value={query}
-            onChangeText={(text) => { setQuery(text); setPage(1); }}
-            placeholder={t('searchPH')}
-            placeholderTextColor="#9DB7E8"
-            returnKeyType="search"
-          />
-          {!!query && (
-            <TouchableOpacity onPress={() => { setQuery(''); setPage(1); }}>
-              <Icon name="close" size={18} color="#9DB7E8" />
-            </TouchableOpacity>
-          )}
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={[styles.header, { backgroundColor: HEADER_BG }]}>
+          <Text style={styles.headerTitle}>{t('header')}</Text>
         </View>
-      </View>
 
-      {/* Compact Filters */}
-      <View style={styles.filterWrap}>
-        <FilterChip val="all"      label={STRINGS[lang].filters.all}      icon="grid-view" />
-        <FilterChip val="online"   label={STRINGS[lang].filters.online}   icon="wifi" />
-        <FilterChip val="offline"  label={STRINGS[lang].filters.offline}  icon="signal-wifi-off" />
-      </View>
+        {/* Search */}
+        <View style={styles.searchRow}>
+          <View style={styles.searchBox}>
+            <IconImg src={icSearch} size={20} style={{ tintColor: '#9DB7E8' }} />
+            <TextInput
+              style={styles.searchInput}
+              value={query}
+              onChangeText={(text) => { setQuery(text); setPage(1); }}
+              placeholder={t('searchPH')}
+              placeholderTextColor="#9DB7E8"
+              returnKeyType="search"
+            />
+            {!!query && (
+              <TouchableOpacity onPress={() => { setQuery(''); setPage(1); }}>
+                <IconImg src={icClose} size={18} style={{ tintColor: '#9DB7E8' }} />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
 
-      {/* List */}
-      <ScrollView
-        style={{flex:1}}
-        contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 22 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* 👇 Nếu đang loading lần đầu → show 8 skeleton card */}
-        {loading && (
-          <>
-            {Array.from({ length: 8 }).map((_, i) => <PortCardSkeleton key={`sk-${i}`} />)}
-          </>
-        )}
+        {/* Compact Filters */}
+        <View style={styles.filterWrap}>
+          <FilterChip val="all"      label={STRINGS[lang].filters.all}      icon={icGrid} />
+          <FilterChip val="online"   label={STRINGS[lang].filters.online}   icon={icWifi} />
+          <FilterChip val="offline"  label={STRINGS[lang].filters.offline}  icon={icWifiOff} />
+        </View>
 
-        {/* Hết loading thì render list thực */}
-        {!loading && pagedData.map((it) => {
-          const offline = isDeviceOffline(it);
+        {/* List */}
+        <ScrollView
+          style={{flex:1}}
+          contentContainerStyle={{ paddingHorizontal: 14, paddingBottom: 22 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          showsVerticalScrollIndicator={false}
+        >
+          {loading && (
+            <>
+              {Array.from({ length: 8 }).map((_, i) => <PortCardSkeleton key={`sk-${i}`} />)}
+            </>
+          )}
 
-          return (
-            <View key={it.id} style={styles.card}>
-              <View style={styles.cardHead}>
-                {/* LEFT */}
-                <View style={{flex:1}}>
-                  <View style={{flexDirection:'row', alignItems:'center'}}>
-                    <StatusDot s={it.status} />
-                    <Text style={[styles.name, { marginLeft: 6 }]} numberOfLines={1}>{it.name}</Text>
+          {!loading && pagedData.map((it) => {
+            const offline = isDeviceOffline(it);
+
+            return (
+              <View key={it.id} style={styles.card}>
+                <View style={styles.cardHead}>
+                  {/* LEFT */}
+                  <View style={{flex:1}}>
+                    <View style={{flexDirection:'row', alignItems:'center'}}>
+                      <StatusDot s={it.status} />
+                      <Text style={[styles.name, { marginLeft: 6 }]} numberOfLines={1}>{it.name}</Text>
+                    </View>
+
+                    {/* Mã thiết bị (code) + vị trí */}
+                    <Text style={[styles.meta, { flexWrap: 'wrap', flexShrink: 1 }]}>
+                      {t('deviceCode')}: <Text style={styles.bold}>{it.code}</Text>
+                    </Text>
                   </View>
 
-                  {/* Mã thiết bị (code) + vị trí */}
-                  <Text style={[styles.meta, { flexWrap: 'wrap', flexShrink: 1 }]}>
-                    {t('deviceCode')}: <Text style={styles.bold}>{it.code}</Text>
-                  </Text>
+                  {/* RIGHT */}
+                  <View style={styles.rightInfo}>
+                    <Text style={styles.metaRight}>{t('ports')}: <Text style={styles.bold}>{it.portsCount}</Text></Text>
+                    <Text style={styles.metaRight}>{t('fw')}: <Text style={styles.bold}>{it.fw}</Text></Text>
+                    <Text style={styles.metaRight}>{t('voltage')}: <Text style={styles.bold}>{it.voltage != null ? `${it.voltage} ` : '—'}</Text></Text>
+                    <Text style={styles.metaRight}>
+                      {t('temp')}: <Text style={styles.bold}>{it.raw?.temperature} °C</Text>
+                    </Text>
+                  </View>
                 </View>
 
-                {/* RIGHT */}
-                <View style={styles.rightInfo}>
-                  <Text style={styles.metaRight}>{t('ports')}: <Text style={styles.bold}>{it.portsCount}</Text></Text>
-                  <Text style={styles.metaRight}>{t('fw')}: <Text style={styles.bold}>{it.fw}</Text></Text>
-                  <Text style={styles.metaRight}>{t('voltage')}: <Text style={styles.bold}>{it.voltage != null ? `${it.voltage} ` : '—'}</Text></Text>
-                  <Text style={styles.metaRight}>
-                    {t('temp')}: <Text style={styles.bold}>{it.raw?.temperature} °C</Text>
-                  </Text>
+                {!!it.ports?.length && (
+                  <View style={styles.portRow}>
+                    {it.ports.map(p => (
+                      <PortBadge key={`${it.id}-${p.n}`} n={p.n} status={p.status} />
+                    ))}
+                  </View>
+                )}
+
+                <View style={styles.actionRow}>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, offline && styles.actionBtnDisabled]}
+                    disabled={offline}
+                    onPress={() => handleCreateOrderPress(it)}
+                  >
+                    <IconImg src={icBolt} size={18} style={{ tintColor: offline ? '#9CA3AF' : '#4A90E2' }} />
+                    <Text style={[styles.actionText, offline && styles.actionTextDisabled]}>{t('createOrder')}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.actionBtn} onPress={() => navigateToScreen('phoneUser')}>
+                    <IconImg src={icTune} size={18} style={{ tintColor: '#4A90E2' }} />
+                    <Text style={styles.actionText}>{t('settings')}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.actionBtn} onPress={() => goHistory(it.raw)}>
+                    <IconImg src={icHistory} size={18} style={{ tintColor: '#4A90E2' }} />
+                    <Text style={styles.actionText}>{t('history')}</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
+            );
+          })}
 
-              {!!it.ports?.length && (
-                <View style={styles.portRow}>
-                  {it.ports.map(p => (
-                    <PortBadge key={`${it.id}-${p.n}`} n={p.n} status={p.status} />
-                  ))}
-                </View>
-              )}
+          {!loading && filtered.length === 0 && (
+            <Text style={{ textAlign:'center', color:'#64748B', marginTop: 28 }}>{t('empty')}</Text>
+          )}
 
-              <View style={styles.actionRow}>
-                <TouchableOpacity
-                  style={[styles.actionBtn, offline && styles.actionBtnDisabled]}
-                  disabled={offline}
-                  onPress={() => handleCreateOrderPress(it)}
-                >
-                  <Icon name="bolt" size={18} color={offline ? '#9CA3AF' : '#4A90E2'} />
-                  <Text style={[styles.actionText, offline && styles.actionTextDisabled]}>{t('createOrder')}</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.actionBtn} onPress={() => navigateToScreen('phoneUser')}>
-                  <Icon name="tune" size={18} color="#4A90E2" />
-                  <Text style={styles.actionText}>{t('settings')}</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.actionBtn} onPress={() => goHistory(it.raw)}>
-                  <Icon name="history" size={18} color="#4A90E2" />
-                  <Text style={styles.actionText}>{t('history')}</Text>
-                </TouchableOpacity>
-              </View>
+          {!loading && filtered.length > limit && (
+            <View style={styles.pagination}>
+              <TouchableOpacity disabled={page <= 1} onPress={() => setPage(p => Math.max(1, p - 1))}>
+                <Text style={[styles.pageBtn, page <= 1 && styles.pageBtnDisabled]}>Trước</Text>
+              </TouchableOpacity>
+              <Text style={styles.pageInfo}>{page} / {totalPages}</Text>
+              <TouchableOpacity disabled={page >= totalPages} onPress={() => setPage(p => Math.min(totalPages, p + 1))}>
+                <Text style={[styles.pageBtn, page >= totalPages && styles.pageBtnDisabled]}>Sau</Text>
+              </TouchableOpacity>
             </View>
-          );
-        })}
-
-        {/* Khi KHÔNG loading và rỗng thật sự → hiện empty */}
-        {!loading && filtered.length === 0 && (
-          <Text style={{ textAlign:'center', color:'#64748B', marginTop: 28 }}>{t('empty')}</Text>
-        )}
-
-        {/* Pagination Controls */}
-        {!loading && filtered.length > limit && (
-          <View style={styles.pagination}>
-            <TouchableOpacity disabled={page <= 1} onPress={() => setPage(p => Math.max(1, p - 1))}>
-              <Text style={[styles.pageBtn, page <= 1 && styles.pageBtnDisabled]}>Trước</Text>
-            </TouchableOpacity>
-            <Text style={styles.pageInfo}>{page} / {totalPages}</Text>
-            <TouchableOpacity disabled={page >= totalPages} onPress={() => setPage(p => Math.min(totalPages, p + 1))}>
-              <Text style={[styles.pageBtn, page >= totalPages && styles.pageBtnDisabled]}>Sau</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </ScrollView>
-    </View>
+          )}
+        </ScrollView>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeRoot: { flex: 1, backgroundColor: '#F6F7FB' },
+
   container: { flex:1, backgroundColor:'#F6F7FB' },
 
   header: {
-    backgroundColor:'#4A90E2',
-    paddingHorizontal:12, paddingTop: Platform.OS==='ios'? 12: 12, paddingBottom:12,
+    paddingHorizontal:12,
+    paddingTop: 12,
+    paddingBottom:12,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    // nhẹ shadow cho iOS, elevation cho Android
+    ...Platform.select({
+      ios: { shadowColor:'#000', shadowOpacity:0.12, shadowOffset:{width:0,height:2}, shadowRadius:6 },
+      android: { elevation: 2 },
+    }),
   },
   headerTitle: { color:'#fff', fontSize:20, fontWeight:'800' },
 
@@ -398,6 +433,7 @@ const styles = StyleSheet.create({
     flexDirection:'row', alignItems:'center',
     backgroundColor:'#E9F2FF', borderRadius:12, paddingHorizontal:12, height:44,
     borderWidth:1, borderColor:'#CDE1FF',
+    columnGap: 8,
   },
   searchInput: { flex:1, fontSize:15, color:'#0F172A' },
 

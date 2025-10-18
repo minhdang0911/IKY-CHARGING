@@ -1,19 +1,30 @@
-// screens/Home/Extend.jsx
+// screens/Home/Extend.jsx (Notch-safe + PNG icons)
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, KeyboardAvoidingView,
   Platform, TextInput, Linking, ActivityIndicator, Modal, BackHandler, PanResponder,
-  Image, Animated, Easing
+  Image, Animated, Easing, StatusBar
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Icon from 'react-native-vector-icons/MaterialIcons';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getPublicPricingPlans, createOrder, createOrderCash } from '../../apis/payment';
-import { getDevices } from '../../apis/devices'; // ⬅️ dùng để refetch device sau khi tạo đơn
+import { getDevices } from '../../apis/devices';
 
-// logos
+// logos (payment methods - you already have these in project; keep paths)
 import momologo from '../../assets/img/momo.png';
 import vnpaylogo from '../../assets/img/vnpay.jpg';
 import cashlogo from '../../assets/img/cash.png';
+
+// local PNG icons (replace MaterialIcons)
+import icBack from '../../assets/img/ic_back.png';
+import icRefresh from '../../assets/img/ic_refresh.png';
+import icError from '../../assets/img/ic_error.png';
+import icClose from '../../assets/img/ic_close.png';
+import icSearch from '../../assets/img/ic_search.png';
+import icCancel from '../../assets/img/ic_cancel.png';
+import icCheck from '../../assets/img/ic_check.png';
+import icOpen from '../../assets/img/ic_open.png';
+import icPayments from '../../assets/img/ic_payments.png';
 
 /* ================= THEME ================= */
 const UI = {
@@ -26,7 +37,6 @@ const UI = {
   good: '#16A34A',
 };
 
-// Chỉ coi là rảnh khi thuộc nhóm này
 const IDLE_STATES = ['idle', 'available', 'free', 'ready'];
 
 /* ================= Small utils ================= */
@@ -53,7 +63,7 @@ const CustomAlert = ({ visible, title = 'Thông báo', message = '', onClose }) 
       <View style={styles.alertBackdrop}>
         <View style={styles.alertBox}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-            <Icon name="error-outline" size={20} color={UI.accent} />
+            <Image source={icError} style={{ width: 20, height: 20, tintColor: UI.accent, marginRight: 6 }} />
             <Text style={styles.alertTitle}>{title}</Text>
           </View>
           <Text style={styles.alertMsg}>{message}</Text>
@@ -76,7 +86,6 @@ const CustomSelect = ({
   getLabel = (x) => x?.label ?? '',
   keyExtractor = (x) => String(x?.id ?? x?.value),
   searchable = true,
-  rightIcon = 'expand-more',
   disabled = false,
   renderValue,
   renderOption,
@@ -104,7 +113,7 @@ const CustomSelect = ({
             ? (renderValue ? renderValue(value) : <Text style={styles.selectText}>{getLabel(value)}</Text>)
             : <Text style={[styles.selectText, { color: UI.sub }]}>{placeholder}</Text>}
         </View>
-        <Icon name={rightIcon} size={22} color={UI.sub} />
+        <Image source={icPayments} style={{ width: 20, height: 20, tintColor: UI.sub }} />
       </TouchableOpacity>
 
       {/* CENTERED DIALOG */}
@@ -115,13 +124,13 @@ const CustomSelect = ({
               <View style={styles.sheetHeader}>
                 <Text style={styles.sheetTitle}>{label || 'Chọn'}</Text>
                 <TouchableOpacity onPress={() => setOpen(false)}>
-                  <Icon name="close" size={22} color={UI.sub} />
+                  <Image source={icClose} style={{ width: 22, height: 22, tintColor: UI.sub }} />
                 </TouchableOpacity>
               </View>
 
               {searchable && (
                 <View style={styles.searchWrap}>
-                  <Icon name="search" size={18} color={UI.sub} />
+                  <Image source={icSearch} style={{ width: 18, height: 18, tintColor: UI.sub }} />
                   <TextInput
                     style={styles.searchInput}
                     placeholder="Tìm nhanh…"
@@ -133,7 +142,7 @@ const CustomSelect = ({
                   />
                   {q ? (
                     <TouchableOpacity onPress={() => setQ('')}>
-                      <Icon name="cancel" size={18} color={UI.sub} />
+                      <Image source={icCancel} style={{ width: 18, height: 18, tintColor: UI.sub }} />
                     </TouchableOpacity>
                   ) : null}
                 </View>
@@ -145,26 +154,28 @@ const CustomSelect = ({
                 keyboardShouldPersistTaps="handled"
                 ItemSeparatorComponent={() => <View style={styles.separator} />}
                 renderItem={({ item }) => {
-                  const isOn = keyExtractor(item) === keyExtractor(value || {});
-                  return (
-                    <TouchableOpacity
-                      activeOpacity={0.9}
-                      style={[styles.optionItem, isOn && { backgroundColor: '#F0F6FF' }]}
-                      onPress={() => { onChange?.(item); setOpen(false); }}
-                    >
-                      {renderOption ? (
-                        renderOption(item, isOn)
-                      ) : (
-                        <>
-                          <Text style={[styles.optionText, isOn && { color: UI.accent, fontWeight: '700' }]}>
-                            {getLabel(item)}
-                          </Text>
-                          {isOn && <Icon name="check" size={18} color={UI.accent} />}
-                        </>
-                      )}
-                    </TouchableOpacity>
-                  );
-                }}
+  const isOn = keyExtractor(item) === keyExtractor(value || {});
+  return (
+    <TouchableOpacity
+      activeOpacity={0.9}
+      style={[styles.optionItem, isOn && { backgroundColor: '#F0F6FF' }]}
+      onPress={() => { onChange?.(item); setOpen(false); }}
+    >
+      {renderOption ? (
+        renderOption(item, isOn)
+      ) : (
+        <>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+            <Text style={[styles.optionText, isOn && { color: UI.accent, fontWeight: '700' }]}>
+              {getLabel(item)}
+            </Text>
+          </View>
+          {isOn && <Image source={icCheck} style={{ width: 18, height: 18, tintColor: UI.accent }} />}
+        </>
+      )}
+    </TouchableOpacity>
+  );
+}}
                 style={{ maxHeight: 420 }}
                 ListEmptyComponent={
                   <View style={{ padding: 16, alignItems: 'center' }}>
@@ -182,7 +193,11 @@ const CustomSelect = ({
 
 /* ================= MAIN ================= */
 export default function Extend({ navigateToScreen, screenData }) {
-  // ⬇️ biến device thành state để có thể cập nhật realtime
+  // notch-safe
+  const insets = useSafeAreaInsets();
+  const topPad = Platform.OS === 'ios' ? insets.top : (StatusBar.currentHeight || 0);
+
+  // state
   const [device, setDevice] = useState(screenData?.device || {});
   const agentId = device?.agent_id?._id || '';
   const deviceId = device?._id || '';
@@ -199,13 +214,11 @@ export default function Extend({ navigateToScreen, screenData }) {
   const [creating, setCreating] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(null);
 
-  // custom alert state
   const [showAlert, setShowAlert] = useState(false);
   const [alertMsg, setAlertMsg] = useState('');
 
   const navigatingRef = useRef(false);
 
-  // ✅ animation hooks đặt OUTSIDE mọi nhánh điều kiện
   const successPulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -228,25 +241,17 @@ export default function Extend({ navigateToScreen, screenData }) {
     }
   }, [navigateToScreen]);
 
-  // ANDROID: back cứng -> chỉ back trang
   useEffect(() => {
-    const onHWBack = () => {
-      goBack();
-      return true;
-    };
+    const onHWBack = () => { goBack(); return true; };
     const sub = BackHandler.addEventListener('hardwareBackPress', onHWBack);
     return () => sub.remove();
   }, [goBack]);
 
-  // iOS: edge swipe từ mép trái để back
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: (e, g) => Platform.OS === 'ios' && g.x0 <= 20,
-      onMoveShouldSetPanResponder: (e, g) =>
-        Platform.OS === 'ios' && g.dx > 10 && Math.abs(g.dy) < 20,
-      onPanResponderRelease: (e, g) => {
-        if (Platform.OS === 'ios' && g.dx > 60) goBack();
-      },
+      onMoveShouldSetPanResponder: (e, g) => Platform.OS === 'ios' && g.dx > 10 && Math.abs(g.dy) < 20,
+      onPanResponderRelease: (e, g) => { if (Platform.OS === 'ios' && g.dx > 60) goBack(); },
     })
   ).current;
 
@@ -260,29 +265,22 @@ export default function Extend({ navigateToScreen, screenData }) {
       const fresh = list.find(d => (d?._id === deviceId) || (d?.device_code === device?.device_code));
       if (fresh) {
         setDevice(fresh);
-        // nếu cổng đã bận thì clear lựa chọn cổng cũ
         if (selectedPort) {
           const latestPort = (fresh.ports || []).find(p => String(p.portNumber) === String(selectedPort.portNumber));
           const latestStatus = String(latestPort?.status || '').toLowerCase();
-          if (!IDLE_STATES.includes(latestStatus)) {
-            setSelectedPort(null);
-          }
+          if (!IDLE_STATES.includes(latestStatus)) setSelectedPort(null);
         }
       }
-    } catch {
-      // im lặng, không phá UI
-    }
+    } catch {}
   }, [deviceId, device?.device_code, selectedPort]);
 
-  // refresh ngay khi vào màn hoặc khi deviceId đổi
   useEffect(() => { refreshDevice(); }, [refreshDevice]);
 
   /* ===== OPTIONS ===== */
   const idlePortOptions = useMemo(
-    () =>
-      ports
-        .filter((p) => IDLE_STATES.includes(String(p.status || '').toLowerCase()))
-        .map((p) => ({ id: p._id, portNumber: p.portNumber, status: p.status })),
+    () => ports
+      .filter((p) => IDLE_STATES.includes(String(p.status || '').toLowerCase()))
+      .map((p) => ({ id: p._id, portNumber: p.portNumber, status: p.status })),
     [ports]
   );
 
@@ -299,17 +297,9 @@ export default function Extend({ navigateToScreen, screenData }) {
       setPlanLoading(true);
       const data = await getPublicPricingPlans(agentId);
       const list = Array.isArray(data) ? data : [];
-      setPricingPlans(
-        list.map((p) => ({
-          id: p._id,
-          name: p.name,
-          price: p.price,
-          raw: p,
-        }))
-      );
+      setPricingPlans(list.map((p) => ({ id: p._id, name: p.name, price: p.price, raw: p })));
     } catch (e) {
-      const msg = onlyMessage(e);
-      setAlertMsg(msg);
+      setAlertMsg(onlyMessage(e));
       setShowAlert(true);
     } finally {
       setPlanLoading(false);
@@ -322,7 +312,7 @@ export default function Extend({ navigateToScreen, screenData }) {
   const ensurePortStillIdle = useCallback(async (portNumber) => {
     try {
       const token = await AsyncStorage.getItem('access_token');
-      if (!token || !deviceId) return true; // không block
+      if (!token || !deviceId) return true;
       const data = await getDevices(token);
       const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
       const fresh = list.find(d => (d?._id === deviceId) || (d?.device_code === device?.device_code));
@@ -334,7 +324,7 @@ export default function Extend({ navigateToScreen, screenData }) {
     }
   }, [deviceId, device?.device_code]);
 
-  /* ===== Create Order (branch by method) ===== */
+  /* ===== Create Order ===== */
   const handleCreateOrder = useCallback(async () => {
     if (!selectedPlan || !selectedPort || !selectedPayment) {
       setAlertMsg('Chọn gói, cổng sạc và phương thức thanh toán trước đã.');
@@ -342,7 +332,6 @@ export default function Extend({ navigateToScreen, screenData }) {
       return;
     }
 
-    // check lại port còn idle không
     const ok = await ensurePortStillIdle(selectedPort.portNumber);
     if (!ok) {
       setAlertMsg('Cổng vừa chuyển trạng thái. Vui lòng chọn lại cổng khác.');
@@ -369,7 +358,6 @@ export default function Extend({ navigateToScreen, screenData }) {
 
       const res = await api(token, payload);
 
-      // --- Chuẩn hoá response ---
       const orderId    = res?.orderId    ?? res?.order_id   ?? null;
       const paymentUrl = res?.paymentUrl ?? res?.data       ?? null;
       const amount     = res?.amount     ?? selectedPlan?.raw?.price
@@ -378,7 +366,7 @@ export default function Extend({ navigateToScreen, screenData }) {
       setOrderSuccess({
         orderId,
         paymentUrl,
-        method, // momo | vnpay | cash
+        method,
         planName: selectedPlan?.raw?.name ?? selectedPlan?.name,
         amount,
         portNumber: selectedPort?.portNumber,
@@ -411,7 +399,7 @@ export default function Extend({ navigateToScreen, screenData }) {
       <View style={[styles.container, { padding: 16, justifyContent: 'center' }]}>
         <View style={styles.successWrap}>
           <Animated.View style={[styles.successBadge, { transform: [{ scale: successPulse }] }]}>
-            <Icon name="check" size={30} color="#fff" />
+            <Image source={icCheck} style={{ width: 30, height: 30, tintColor: '#fff' }} />
           </Animated.View>
 
           <Text style={styles.successTitle}>Tạo đơn thành công!</Text>
@@ -423,7 +411,6 @@ export default function Extend({ navigateToScreen, screenData }) {
                   : 'Đơn hàng MoMo đã tạo.')}
           </Text>
 
-          {/* 🔥 Chỉ hiện Mã đơn khi là momo */}
           {orderSuccess.method === 'momo' && (
             <View style={styles.successInfoCard}>
               <Row k="Mã đơn" v={orderSuccess.orderId || '—'} />
@@ -447,7 +434,7 @@ export default function Extend({ navigateToScreen, screenData }) {
               style={[styles.btn, styles.ctaBtn]}
               onPress={() => Linking.openURL(orderSuccess.paymentUrl)}
             >
-              <Icon name="open-in-new" size={18} color="#fff" style={{ marginRight: 8 }} />
+              <Image source={icOpen} style={{ width: 18, height: 18, tintColor: '#fff', marginRight: 8 }} />
               <Text style={styles.btnText}>{payBtnLabel}</Text>
             </TouchableOpacity>
           ) : (
@@ -471,7 +458,7 @@ export default function Extend({ navigateToScreen, screenData }) {
                 setSelectedPlan(null);
                 setSelectedPort(null);
                 setSelectedPayment(null);
-                await refreshDevice(); // ⬅️ load lại trạng thái ports trước khi tạo đơn mới
+                await refreshDevice();
               }}
             >
               <Text style={styles.btnGhostText}>Tạo đơn khác</Text>
@@ -479,7 +466,6 @@ export default function Extend({ navigateToScreen, screenData }) {
           </View>
         </View>
 
-        {/* Alert dùng chung */}
         <CustomAlert
           visible={showAlert}
           message={alertMsg}
@@ -491,20 +477,20 @@ export default function Extend({ navigateToScreen, screenData }) {
 
   /* ===== Main Form ===== */
   return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: UI.bg }} edges={['top']}>
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: UI.bg }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       {...(Platform.OS === 'ios' ? panResponder.panHandlers : {})}
     >
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: 8 + topPad }]}>
         <TouchableOpacity onPress={goBack} style={{ padding: 6 }}>
-          <Text style={{fontSize: 30, color: '#fff'}}>{'‹'}</Text>
+          <Image source={icBack} style={{ width: 24, height: 24, tintColor: '#fff' }} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Tạo đơn hàng</Text>
-        {/* Reload button */}
         <TouchableOpacity onPress={refreshDevice} style={{ padding: 6 }}>
-          <Icon name="refresh" size={22} color="#fff" />
+          <Image source={icRefresh} style={{ width: 22, height: 22, tintColor: '#fff' }} />
         </TouchableOpacity>
       </View>
 
@@ -551,7 +537,6 @@ export default function Extend({ navigateToScreen, screenData }) {
             getLabel={(it) => it?.name || ''}
             keyExtractor={(it) => String(it?.id)}
             searchable={false}
-            rightIcon="payments"
             renderValue={(it) => (
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <Image source={it.icon} style={{ width: 22, height: 22, borderRadius: 4, marginRight: 8 }} />
@@ -564,26 +549,10 @@ export default function Extend({ navigateToScreen, screenData }) {
                   <Image source={it.icon} style={{ width: 26, height: 26, borderRadius: 6, marginRight: 10 }} />
                   <Text style={[styles.optionText, isOn && { color: UI.accent, fontWeight: '700' }]}>{it.name}</Text>
                 </View>
-                {isOn && <Icon name="check" size={18} color={UI.accent} />}
+                {isOn && <Image source={icCheck} style={{ width: 18, height: 18, tintColor: UI.accent }} />}
               </>
             )}
           />
-
-          {/* Phone (optional)
-          <View style={{ marginTop: 4 }}>
-            <Text style={styles.label}>Số điện thoại (tuỳ chọn)</Text>
-            <View style={styles.inputWrap}>
-              <Icon name="phone-iphone" size={18} color={UI.sub} />
-              <TextInput
-                style={styles.input}
-                placeholder="Nhập số điện thoại"
-                placeholderTextColor={UI.sub}
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-              />
-            </View>
-          </View> */}
 
           <View style={{ marginTop: 14 }}>
             <TouchableOpacity
@@ -606,22 +575,17 @@ export default function Extend({ navigateToScreen, screenData }) {
                 </>
               )}
             </TouchableOpacity>
-
-            {/* Nút cập nhật trạng thái cổng thủ công */}
-            {/* <TouchableOpacity style={[styles.btnGhost, { marginTop: 10 }]} onPress={refreshDevice}>
-              <Text style={styles.btnGhostText}>Cập nhật trạng thái cổng</Text>
-            </TouchableOpacity> */}
           </View>
         </View>
       </View>
 
-      {/* Alert dùng chung */}
       <CustomAlert
         visible={showAlert}
         message={alertMsg}
         onClose={() => setShowAlert(false)}
       />
     </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
@@ -644,7 +608,7 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: UI.accent,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between'
@@ -797,3 +761,4 @@ const styles = StyleSheet.create({
   },
   alertBtnText: { color: '#fff', fontWeight: '700', textAlign: 'center' },
 });
+

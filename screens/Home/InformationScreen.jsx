@@ -1,4 +1,4 @@
-// screens/Home/InformationScreen.jsx
+// screens/Home/InformationScreen.jsx (PNG icons, no MaterialIcons)
 import React, { useEffect, useState } from 'react';
 import {
   View,
@@ -11,13 +11,20 @@ import {
   Linking,
   Platform,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import logoInfo from '../../assets/img/background.png';
 import { API_URL } from '@env';
 
-// ❌ Bỏ NotificationContext
-// import { NotificationContext } from '../../App';
+// PNG icons
+import icPerson from '../../assets/img/cskh.png';
+import icPhone from '../../assets/img/ic_phone.png';
+import icSupport from '../../assets/img/ic_support.png';
+import icAccount from '../../assets/img/ic_account.png';
+import icInfo from '../../assets/img/company.png';
+import icLock from '../../assets/img/ic_lock.png';
+import icLogout from '../../assets/img/ic_logout.png';
+import icChevronRight from '../../assets/img/ic_chevron_right.png';
+import icBell from '../../assets/img/ic_bell.png';
 
 const LANG_KEY = 'app_language';
 
@@ -43,7 +50,7 @@ const STRINGS = {
 };
 
 const openTel = phone => {
-  const url = `tel:${phone.replace(/\s/g, '')}`;
+  const url = `tel:${phone.replace(/\\s/g, '')}`;
   Linking.openURL(url).catch(() => {});
 };
 
@@ -66,41 +73,38 @@ export default function InformationScreen({ logout, navigateToScreen }) {
     })();
   }, []);
 
-
   async function handleLogoutPress() {
-  try {
-    // lấy token hiện tại
-    const token = await AsyncStorage.getItem('access_token');
-
-    // gọi API logout (không cần body)
-    if (token) {
-      await fetch(`${API_URL}/api/auth/logout`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      }).catch(() => {}); // dù fail vẫn cleanup local
+    try {
+      const token = await AsyncStorage.getItem('access_token');
+      if (token) {
+        await fetch(`${API_URL}/api/auth/logout`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+      }
+    } finally {
+      await AsyncStorage.multiRemove([
+        'access_token',
+        'refresh_token',
+        'expires_at',
+        'user_oid',
+        'username',
+      ]);
+      logout && logout();
     }
-  } finally {
-    // dọn token & state local rồi gọi prop logout()
-    await AsyncStorage.multiRemove([
-      'access_token',
-      'refresh_token',
-      'expires_at',
-      'user_oid',
-      'username',
-    ]);
-    logout && logout();
   }
-}
-
 
   return (
     <SafeAreaView style={styles.wrap}>
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>{t('headerTitle')}</Text>
-        {/* <TouchableOpacity style={styles.headerBtn} onPress={handleNotificationPress}>
+
+        {/* Nếu cần bật lại notification button */}
+        {/*
+        <TouchableOpacity style={styles.headerBtn} onPress={handleNotificationPress}>
           <View style={styles.notificationContainer}>
-            <Icon name="notifications" size={24} color="#fff" />
+            <Image source={icBell} style={{ width: 24, height: 24, tintColor: '#fff' }} />
             {unreadCount > 0 && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>
@@ -109,7 +113,8 @@ export default function InformationScreen({ logout, navigateToScreen }) {
               </View>
             )}
           </View>
-        </TouchableOpacity> */}
+        </TouchableOpacity>
+        */}
       </View>
 
       {/* Nội dung chính có thể scroll */}
@@ -133,13 +138,14 @@ export default function InformationScreen({ logout, navigateToScreen }) {
           <TouchableOpacity
             style={styles.contactRow}
             onPress={() => openTel('0902 806 999')}
+            activeOpacity={0.9}
           >
-            <Icon name="person" size={20} color="#666" />
+            <Image source={icPerson} style={{ width: 20, height: 20, tintColor: '#666' }} />
             <View style={styles.contactText}>
               <Text style={styles.contactLabel}>{t('cs')}</Text>
               <Text style={styles.contactPhone}>0902 806 999</Text>
             </View>
-            <Icon name="phone" size={20} color="#1e88e5" />
+            <Image source={icPhone} style={{ width: 20, height: 20, tintColor: '#1e88e5' }} />
           </TouchableOpacity>
 
           <View style={styles.divider} />
@@ -147,38 +153,38 @@ export default function InformationScreen({ logout, navigateToScreen }) {
           <TouchableOpacity
             style={styles.contactRow}
             onPress={() => openTel('0938 859 085')}
+            activeOpacity={0.9}
           >
-            <Icon name="support-agent" size={20} color="#666" />
+            <Image source={icSupport} style={{ width: 20, height: 20, tintColor: '#666' }} />
             <View style={styles.contactText}>
               <Text style={styles.contactLabel}>{t('tech')}</Text>
               <Text style={styles.contactPhone}>0938 859 085</Text>
             </View>
-            <Icon name="phone" size={20} color="#1e88e5" />
+            <Image source={icPhone} style={{ width: 20, height: 20, tintColor: '#1e88e5' }} />
           </TouchableOpacity>
         </View>
 
         {/* Menu */}
         <View style={styles.card}>
           <MenuItem
-            icon="account-circle"
+            icon={icAccount}
             text={t('accountInfo')}
             onPress={() => navigateToScreen('changeInfo')}
           />
           <View style={styles.divider} />
           <MenuItem
-            icon="info"
+            icon={icInfo}
             text={t('manufacturerInfo')}
             onPress={() => navigateToScreen('companyInfo')}
           />
           <View style={styles.divider} />
           <MenuItem
-            icon="lock"
+            icon={icLock}
             text={t('changePassword')}
             onPress={() => navigateToScreen('changePassword')}
           />
           <View style={styles.divider} />
-          <MenuItem icon="logout" text={t('logout')} onPress={handleLogoutPress} />
-
+          <MenuItem icon={icLogout} text={t('logout')} onPress={handleLogoutPress} />
         </View>
       </View>
     </SafeAreaView>
@@ -188,10 +194,10 @@ export default function InformationScreen({ logout, navigateToScreen }) {
 const MenuItem = ({ icon, text, onPress }) => (
   <TouchableOpacity style={styles.menuItem} onPress={onPress} activeOpacity={0.8}>
     <View style={styles.menuLeft}>
-      <Icon name={icon} size={20} color="#666" />
+      <Image source={icon} style={{ width: 20, height: 20, tintColor: '#666' }} />
       <Text style={styles.menuText}>{text}</Text>
     </View>
-    <Icon name="chevron-right" size={22} color="#bbb" />
+    <Image source={icChevronRight} style={{ width: 18, height: 18, tintColor: '#bbb' }} />
   </TouchableOpacity>
 );
 

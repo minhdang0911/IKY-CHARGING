@@ -7,6 +7,7 @@ import {
   ScrollView,
   BackHandler,
   Platform,
+  Image
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 
@@ -15,6 +16,7 @@ import useAgentInfo from '../../Hooks/useAgentInfo';
 import { STRINGS } from '../../i18n/strings';
 import FancyLoading from '../../components/skeleton/FancyLoading';
 import AgentCard from '../../components/AgentCard';
+import icBack from '../../assets/img/ic_back.png';
 
 const ChangeInfo = ({ navigateToScreen, navigation }) => {
   const { language } = useLanguage('vi');
@@ -76,9 +78,9 @@ const ChangeInfo = ({ navigateToScreen, navigation }) => {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
-            <Icon name="arrow-back" size={24} color="white" />
-          </TouchableOpacity>
+        <TouchableOpacity onPress={handleBackPress} style={{ padding: 6 }}>
+          <Image source={icBack} style={{ width: 24, height: 24, tintColor: '#fff' }} />
+        </TouchableOpacity>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {t('headerTitle')}
           </Text>

@@ -37,8 +37,8 @@ android {
         applicationId "com.ikycharging"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode 4
+        versionName "1.3"
         multiDexEnabled true
 
         // Chỉ định flavor mặc định cho react-native-camera

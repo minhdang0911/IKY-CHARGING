@@ -11,28 +11,26 @@ export default function EdgeDrawer({
   visible,
   onClose,
   width = Math.round(SCREEN_W * 0.78),
-  edgeHitWidth = 32,           // tăng vùng vuốt từ 24 -> 32
+  edgeHitWidth = 32,
   topOffset = 0,
   children,
-  // 🔥 NEW: Custom configs
-  backdropOpacity = 0.5,       // độ tối backdrop (0-1)
-  damping = 22,                // độ nảy spring (càng cao càng ít nảy)
-  stiffness = 250,             // độ cứng spring (càng cao càng nhanh)
-  openDuration = 200,          // ms
-  closeDuration = 180,         // ms
-  velocityThreshold = 0.4,     // tốc độ vuốt để trigger open/close
+  backdropOpacity = 0.5,
+  damping = 22,
+  stiffness = 250,
+  openDuration = 200,
+  closeDuration = 180,
+  velocityThreshold = 0.4,
 }) {
   const translateX = useRef(new Animated.Value(-width - 20)).current;
   const backdrop = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(0.92)).current; // 🔥 scale animation
+  const scale = useRef(new Animated.Value(0.92)).current;
 
-  // 🔥 IMPROVED: Smooth open với spring + scale
   const open = useCallback(() => {
     Animated.parallel([
       Animated.timing(backdrop, {
         toValue: 1,
         duration: openDuration,
-        easing: Easing.bezier(0.25, 0.1, 0.25, 1), // smooth bezier
+        easing: Easing.bezier(0.25, 0.1, 0.25, 1),
         useNativeDriver: true,
       }),
       Animated.spring(translateX, {
@@ -40,7 +38,7 @@ export default function EdgeDrawer({
         useNativeDriver: true,
         damping,
         stiffness,
-        velocity: 2, // initial velocity for smoother start
+        velocity: 2,
       }),
       Animated.spring(scale, {
         toValue: 1,
@@ -51,7 +49,6 @@ export default function EdgeDrawer({
     ]).start();
   }, [backdrop, translateX, scale, openDuration, damping, stiffness]);
 
-  // 🔥 IMPROVED: Smooth close với easing curve tốt hơn
   const close = useCallback((cb) => {
     Animated.parallel([
       Animated.timing(backdrop, {
@@ -63,7 +60,7 @@ export default function EdgeDrawer({
       Animated.timing(translateX, {
         toValue: -width - 20,
         duration: closeDuration,
-        easing: Easing.bezier(0.4, 0, 1, 1), // decelerate
+        easing: Easing.bezier(0.4, 0, 1, 1),
         useNativeDriver: true,
       }),
       Animated.timing(scale, {
@@ -82,7 +79,6 @@ export default function EdgeDrawer({
     else close(onClose);
   }, [visible, open, close]); // eslint-disable-line
 
-  // 🔥 IMPROVED: Pan responder với velocity tracking
   const startX = useRef(0);
   const velocityX = useRef(0);
   const lastMoveTime = useRef(0);
@@ -95,11 +91,9 @@ export default function EdgeDrawer({
         return Math.abs(g.dx) > 3;
       },
       onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 3,
-      
+
       onPanResponderGrant: () => {
-        translateX.stopAnimation((v) => {
-          startX.current = v;
-        });
+        translateX.stopAnimation((v) => { startX.current = v; });
         scale.stopAnimation();
         velocityX.current = 0;
         lastMoveTime.current = Date.now();
@@ -107,40 +101,33 @@ export default function EdgeDrawer({
       },
 
       onPanResponderMove: (_, g) => {
-        // 🔥 Calculate velocity
         const now = Date.now();
         const dt = now - lastMoveTime.current;
         if (dt > 0) {
-          velocityX.current = (g.dx - lastDx.current) / dt * 1000; // px/s
+          velocityX.current = (g.dx - lastDx.current) / dt * 1000;
         }
         lastMoveTime.current = now;
         lastDx.current = g.dx;
 
-        // Update position
         let next = startX.current + g.dx;
         next = Math.min(0, Math.max(next, -width - 20));
         translateX.setValue(next);
 
-        // Update backdrop & scale based on position
         const progress = 1 - Math.abs(next / (-width - 20));
         backdrop.setValue(progress);
-        scale.setValue(0.92 + progress * 0.08); // 0.92 -> 1.0
+        scale.setValue(0.92 + progress * 0.08);
       },
 
       onPanResponderRelease: (_, g) => {
         const end = startX.current + g.dx;
         const velocity = velocityX.current;
-        
-        // 🔥 Smart decision: combine velocity + position
-        const shouldOpen = 
-          velocity > velocityThreshold * 1000 || // fast swipe right
-          (velocity > -velocityThreshold * 1000 && end > -width / 2); // slow but past halfway
-        
-        if (shouldOpen) {
-          open();
-        } else {
-          close(onClose);
-        }
+
+        const shouldOpen =
+          velocity > velocityThreshold * 1000 ||
+          (velocity > -velocityThreshold * 1000 && end > -width / 2);
+
+        if (shouldOpen) open();
+        else close(onClose);
       },
     })
   ).current;
@@ -178,7 +165,7 @@ export default function EdgeDrawer({
         }}
       />
 
-      {/* 🔥 ENHANCED: Backdrop với opacity động */}
+      {/* Backdrop */}
       <Animated.View
         pointerEvents={visible ? 'auto' : 'none'}
         style={[
@@ -201,7 +188,7 @@ export default function EdgeDrawer({
         </TouchableWithoutFeedback>
       </Animated.View>
 
-      {/* 🔥 ENHANCED: Drawer panel với scale + shadow động */}
+      {/* Drawer panel */}
       <Animated.View
         {...pan.panHandlers}
         style={[
@@ -210,23 +197,12 @@ export default function EdgeDrawer({
             width,
             top: topOffset,
             height: SCREEN_H - topOffset,
-            transform: [
-              { translateX },
-              { scale }, // 🔥 thêm scale animation
-            ],
-            // 🔥 Dynamic shadow dựa trên backdrop
-            shadowOpacity: backdrop.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, 0.25],
-            }),
-            elevation: backdrop.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, 24],
-            }),
+            transform: [{ translateX }, { scale }],
+            shadowOpacity: backdrop.interpolate({ inputRange: [0, 1], outputRange: [0, 0.25] }),
+            elevation: backdrop.interpolate({ inputRange: [0, 1], outputRange: [0, 24] }),
           },
         ]}
       >
-        {/* 🔥 Inner shadow effect */}
         <View style={styles.innerShadow} />
         {children}
       </Animated.View>
@@ -239,13 +215,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     backgroundColor: '#fff',
-    borderTopRightRadius: 24,      // 🔥 bo góc phải
-    borderBottomRightRadius: 24,   // 🔥 bo góc phải
+    borderTopRightRadius: 24,
+    borderBottomRightRadius: 24,
     shadowColor: '#000',
-    shadowRadius: 20,               // 🔥 tăng từ 16 -> 20
-    shadowOffset: { width: 8, height: 0 }, // 🔥 tăng từ 6 -> 8
+    shadowRadius: 20,
+    shadowOffset: { width: 8, height: 0 },
     paddingTop: 8,
-    overflow: 'hidden',             // 🔥 để inner shadow hoạt động
+    overflow: 'hidden',
   },
   innerShadow: {
     position: 'absolute',
@@ -253,6 +229,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     width: 1,
-    backgroundColor: '#E5E7EB',     // 🔥 viền nhẹ bên phải
+    backgroundColor: '#E5E7EB',
   },
 });

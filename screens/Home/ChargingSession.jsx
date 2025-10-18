@@ -1,11 +1,10 @@
-// screens/Home/ChargingSession.jsx (WEB + MOBILE, Download + Notification)
+// screens/Home/ChargingSession.jsx (PNG icons, no vector-icons)
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   SafeAreaView, View, Text, StyleSheet, TouchableOpacity, FlatList,
   RefreshControl, ActivityIndicator, BackHandler, PanResponder,
-  Pressable, ScrollView, Platform, Alert, PermissionsAndroid, ToastAndroid,
+  Pressable, ScrollView, Platform, Alert, PermissionsAndroid, ToastAndroid, Image,
 } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSessions } from '../../apis/devices';
 import SearchBar from '../../components/SearchBar';
@@ -26,9 +25,14 @@ if (Platform.OS === 'web') {
   saveAs = require('file-saver').saveAs;
 }
 
+// Local PNG icons
+import icClose from '../../assets/img/ic_close.png';
+import icDownload from '../../assets/img/ic_download.png';
+
 /* ================= helpers ================= */
 const TAB_BAR_HEIGHT = 72;
-const BOTTOM_PAD = TAB_BAR_HEIGHT + 36;
+const PAGINATION_DOCK_HEIGHT = 96; // ~2 hàng (Prev/Next + Go to)
+const BOTTOM_PAD = TAB_BAR_HEIGHT + PAGINATION_DOCK_HEIGHT + 16; // chừa chỗ cho dock cố định
 
 async function getAccessTokenSafe() {
   const keys = ['access_token', 'accessToken', 'ACCESS_TOKEN', 'token', 'auth_token'];
@@ -106,7 +110,7 @@ function MonthDropdown({ options, value, onChange }) {
             <View style={styles.ddHeader}>
               <Text style={styles.ddTitle}>Chọn tháng</Text>
               <TouchableOpacity onPress={close} style={styles.ddClose}>
-                <Icon name="close" size={18} color="#6B7280" />
+                <Image source={icClose} style={{ width: 18, height: 18, tintColor: '#6B7280' }} />
               </TouchableOpacity>
             </View>
 
@@ -584,7 +588,7 @@ export default function ChargingSession({ navigateToScreen }) {
           onChange={(k) => { setSelectedMonth(k); setPage(1); }}
         />
         <TouchableOpacity onPress={exportExcel} style={styles.exportBtn} activeOpacity={0.9}>
-          <Icon name="download" size={16} color="#fff" />
+          <Image source={icDownload} style={{ width: 16, height: 16, tintColor: '#fff', marginRight: 8 }} />
           <Text style={styles.exportText}>Xuất Excel</Text>
         </TouchableOpacity>
       </View>
@@ -593,37 +597,64 @@ export default function ChargingSession({ navigateToScreen }) {
         <MonthTotalCard />
       </View>
 
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#4A90E2" />
-          <Text style={{ marginTop: 8, color: '#64748b' }}>Đang tải dữ liệu…</Text>
+    {loading ? (
+  <View style={styles.center}>
+    <ActivityIndicator size="large" color="#4A90E2" />
+    <Text style={{ marginTop: 8, color: '#64748b' }}>Đang tải dữ liệu…</Text>
+  </View>
+) : (
+  <>
+    <FlatList
+      data={items}
+      keyExtractor={(it, idx) => String(it?._id || it?.order_id || idx)}
+      renderItem={renderItem}
+      ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+      contentContainerStyle={{
+        padding: 16,
+        paddingBottom: 8, // vừa đủ, không cần chừa dock nữa
+      }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      ListEmptyComponent={
+        <View style={styles.emptyWrap}>
+          <Text style={styles.emptyText}>Không có phiên phù hợp</Text>
         </View>
-      ) : (
-        <FlatList
-          data={items}
-          keyExtractor={(it, idx) => String(it?._id || it?.order_id || idx)}
-          renderItem={renderItem}
-          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-          contentContainerStyle={{ padding: 16, paddingBottom: BOTTOM_PAD, overflow: 'visible' }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          ListEmptyComponent={
-            <View style={styles.emptyWrap}>
-              <Text style={styles.emptyText}>Không có phiên phù hợp</Text>
-            </View>
-          }
-          ListFooterComponent={
-            <View style={{ marginTop: 12, backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' }}>
-              <PaginationControls
-                page={page}
-                totalPages={totalPages}
-                onPrev={handlePrev}
-                onNext={handleNext}
-              />
-            </View>
-          }
-          showsVerticalScrollIndicator={false}
+      }
+    />
+
+    {/* KHỐI PHÂN TRANG CỐ ĐỊNH (giống HistoryExtend) */}
+    <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
+      <View
+        style={{
+          backgroundColor: '#fff',
+          borderRadius: 12,
+          overflow: 'hidden',
+          borderWidth: 1,
+          borderColor: '#E5E7EB',
+          elevation: 3,
+          shadowColor: '#000',
+          shadowOpacity: 0.05,
+          shadowRadius: 6,
+          shadowOffset: { width: 0, height: 4 },
+        }}
+      >
+        <PaginationControls
+          page={page}
+          totalPages={totalPages}
+          onPrev={handlePrev}
+          onNext={handleNext}
+          showGoto
+          onJump={(n) => {
+            setPage(n);
+            if (selectedMonth === 'all') fetchBackendPage(n, search);
+            else applyFEFilterPaginate(selectedMonth, search, n);
+          }}
         />
-      )}
+      </View>
+    </View>
+  </>
+)}
+
+
     </SafeAreaView>
   );
 }
@@ -784,4 +815,7 @@ const styles = StyleSheet.create({
 
   emptyWrap: { padding: 24, alignItems: 'center' },
   emptyText: { marginTop: 8, color: '#94a3b8', fontWeight: '600' },
+
+   
+
 });

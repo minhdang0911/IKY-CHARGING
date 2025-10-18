@@ -3,15 +3,20 @@ import {
   StyleSheet, View, Text, TouchableOpacity, Image, Animated, Platform,
   KeyboardAvoidingView, ScrollView, ActivityIndicator, Keyboard, Pressable
 } from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialIcons';
 import { showMessage } from '../../components/Toast/Toast';
 import useLogin from '../../Hooks/useLogin';
 import FloatingTextField from '../../components/form/FloatingTextField';
-import PasswordField from '../../components/form/PasswordField'; // tái dùng
 import LangSheet from '../../components/auth/LangSheet';
 import { STRINGS } from '../../i18n/strings';
 
-const logo = require('../../assets/img/ic_launcher.png');
+// assets
+import logo from '../../assets/img/ic_launcher.png';
+import userIcon from '../../assets/img/ic_user_24.png';
+import lockIcon from '../../assets/img/ic_lock_24.png';
+import eyeOpen from '../../assets/img/ic_eye_open.png';
+import eyeClosed from '../../assets/img/ic_eye_closed.png';
+import icTranslate from '../../assets/img/ic_translate.png';
+import icTranslateActive from '../../assets/img/ic_translate_active.png';
 
 export default function LoginScreen({ navigateToScreen, login }) {
   const passwordRef = useRef(null);
@@ -30,7 +35,7 @@ export default function LoginScreen({ navigateToScreen, login }) {
     shakeAnim, submit, t,
   } = useLogin({
     notify: showMessage,
-    onSuccess: () => { /* điều hướng sau login nếu muốn */ },
+    onSuccess: () => {},
   });
 
   const disabled = !username || !password || loading;
@@ -57,7 +62,7 @@ export default function LoginScreen({ navigateToScreen, login }) {
               value={username}
               onChangeText={(v) => { setUsername(v); if (!v) setErrorText(''); }}
               label={t('usernameLabel')}
-              icon="person"
+              leftSlot={<Image source={userIcon} style={s.icon} />}
               focused={usernameFocused}
               onFocus={onFocusU}
               onBlur={onBlurU}
@@ -68,41 +73,46 @@ export default function LoginScreen({ navigateToScreen, login }) {
               rightSlot={null}
             />
 
-            {/* Password (xài PasswordField nhưng với label nổi => pass label & rightSlot) */}
-            <View>
-              <FloatingTextField
-                value={password}
-                onChangeText={(v) => { setPassword(v); if (!v) setErrorText(''); }}
-                label={t('passwordLabel')}
-                icon="lock"
-                focused={passwordFocused}
-                onFocus={onFocusP}
-                onBlur={onBlurP}
-                animValue={passwordLabelAnim}
-                inputRef={passwordRef}
-                autoComplete="password"
-                secureTextEntry={!showPassword}
-                returnKeyType="done"
-                onSubmitEditing={() => submit({ externalLoginCallback: login })}
-                rightSlot={
-                  <TouchableOpacity style={{ padding: 6 }} onPress={() => setShowPassword(s => !s)}>
-                    <Icon name={showPassword ? 'visibility' : 'visibility-off'} size={20} color="#9aa0a6" />
-                  </TouchableOpacity>
-                }
-              />
-            </View>
+            {/* Password */}
+            {/* Password */}
+<FloatingTextField
+  key="password-field"
+  value={password}
+  onChangeText={(v) => { setPassword(v); if (!v) setErrorText(''); }}
+  label={t('passwordLabel')}
+  leftSlot={<Image source={lockIcon} style={s.icon} key="lock-icon" />}
+  focused={passwordFocused}
+  onFocus={onFocusP}
+  onBlur={onBlurP}
+  animValue={passwordLabelAnim}
+  inputRef={passwordRef}
+  autoComplete="password"
+  secureTextEntry={!showPassword}
+  returnKeyType="done"
+  onSubmitEditing={() => submit({ externalLoginCallback: login })}
+  rightSlot={
+    <TouchableOpacity style={{ padding: 6 }} onPress={() => setShowPassword(s => !s)}>
+      <Image 
+        source={showPassword ? eyeOpen : eyeClosed} 
+        style={[s.icon, { tintColor: '#9aa0a6' }]} 
+        key={showPassword ? 'eye-open' : 'eye-closed'}
+      />
+    </TouchableOpacity>
+  }
+/>
 
             {!!errorText && <Text style={s.errorText}>{errorText}</Text>}
 
             <View style={s.rowBetween}>
-              {/* <TouchableOpacity onPress={() => setRemember(r => !r)} style={s.rememberWrap} hitSlop={{ top:10,bottom:10,left:10,right:10 }}>
-                <Icon name={remember ? 'check-box' : 'check-box-outline-blank'} size={20} color="#1e88e5" />
-                <Text style={{ marginLeft: 8, color: '#0f172a' }}>{t('remember')}</Text>
-              </TouchableOpacity> */}
-
+              {/* Quick language toggle */}
               <TouchableOpacity onPress={() => setShowLangSheet(true)} style={s.quickLangBtn}>
-                <Icon name="translate" size={18} color="#1e88e5" />
-                <Text style={s.quickLangText}>{t('quickLang')}: {language === 'vi' ? 'VI' : 'EN'}</Text>
+                <Image
+                  source={showLangSheet ? icTranslateActive : icTranslate}
+                  style={[s.icon, showLangSheet && { tintColor: undefined }]}
+                />
+                <Text style={s.quickLangText}>
+                  {t('quickLang')}: {language === 'vi' ? 'VI' : 'EN'}
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -149,9 +159,9 @@ const s = StyleSheet.create({
     elevation: 6, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 10, shadowOffset: { width: 0, height: 4 },
     borderWidth: 1, borderColor: '#eef2f7',
   },
+  icon: { width: 20, height: 20, resizeMode: 'contain', opacity: 0.9 },
   errorText: { color: '#d93025', fontSize: 13, marginTop: -4, marginBottom: 8, textAlign: 'right' },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 2, marginBottom: 14 },
-  rememberWrap: { flexDirection: 'row', alignItems: 'center' },
   quickLangBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 8 },
   quickLangText: { color: '#1e88e5', fontSize: 14, fontWeight: '700' },
   loginButton: { backgroundColor: '#1e88e5', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 8 },

@@ -5,6 +5,12 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import icOverview from '../../assets/img/ic_overview.png';
 import icOverviewActive from '../../assets/img/ic_overview_active.png';
+import icMonitoring from '../../assets/img/ic_monitoring.png';
+import icMonitoringActive from '../../assets/img/ic_monitoring_active.png';
+import icDevice from '../../assets/img/ic_device.png';
+import icDeviceActive from '../../assets/img/ic_device_active.png';
+import icInfo from '../../assets/img/ic_info.png';
+import icInfoActive from '../../assets/img/ic_info_active.png';
 
 
 const LANG_KEY = 'app_language';
@@ -44,10 +50,10 @@ const BottomTabNavigation = ({ currentScreen, navigateToScreen, hidden = false }
   // 👇 Icons mới phù hợp với app trạm sạc
    
  const tabs = [
-  { id: 'Monitoring', icon: 'ev-station' },
-  { id: 'Journey', icon: icOverview, activeIcon: icOverviewActive },  
-  { id: 'Device', icon: 'router' },
-  { id: 'Information', icon: 'info' },
+  { id: 'Monitoring', icon: icMonitoring, activeIcon: icMonitoringActive },
+  { id: 'Journey', icon: icOverview, activeIcon: icOverviewActive },
+  { id: 'Device', icon: icDevice, activeIcon: icDeviceActive },
+  { id: 'Information', icon: icInfo, activeIcon: icInfoActive },
 ];
 
   return (

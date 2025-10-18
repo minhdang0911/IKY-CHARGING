@@ -11,7 +11,9 @@ import {
   TouchableOpacity,
   Dimensions,
   ToastAndroid,
+ 
 } from 'react-native';
+import { Image } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ViewShot from 'react-native-view-shot';
@@ -31,6 +33,18 @@ import iconsOrder from '../../assets/img/iconsOrder.png';
 import iconstation from '../../assets/img/iconstation.png';
 import iconsDevice from '../../assets/img/iconsDevice.png';
 import iconsrevenue from '../../assets/img/iconsrevenue.png';
+
+import icDownload from '../../assets/img/ic_download.png';
+import icShare from '../../assets/img/ic_share.png';
+import icBar from '../../assets/img/ic_bar.png';
+import icLine from '../../assets/img/ic_line.png';
+import icHistory from '../../assets/img/ic_history.png';
+import icTrendUp from '../../assets/img/ic_trend_up.png';
+import icTrendDown from '../../assets/img/ic_trend_down.png';
+import icEqual from '../../assets/img/ic_equal.png';
+import icCompare from '../../assets/img/ic_compare.png'; 
+import icEast from '../../assets/img/ic_east.png';
+
 
 const LANG_KEY = 'app_language';
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -351,7 +365,7 @@ export default function JourneyScreen({ navigateToScreen }) {
                 onLongPress={() => showTip('Xuất báo cáo CSV (VND)')}
                 accessibilityLabel="Xuất CSV"
               >
-                <Icon name="file-download" size={18} color="#64748B" />
+               <Image source={icDownload} style={{ width: 18, height: 18, tintColor: '#64748B' }} />
               </TouchableOpacity>
 
               {/* Chia sẻ ảnh báo cáo */}
@@ -361,7 +375,7 @@ export default function JourneyScreen({ navigateToScreen }) {
                 onLongPress={() => showTip('Chia sẻ báo cáo dạng ảnh')}
                 accessibilityLabel="Chia sẻ ảnh báo cáo"
               >
-                <Icon name="ios-share" size={18} color="#64748B" />
+                <Image source={icShare} style={{ width: 18, height: 18, tintColor: '#64748B' }} />
               </TouchableOpacity>
 
               {/* Bar */}
@@ -371,11 +385,7 @@ export default function JourneyScreen({ navigateToScreen }) {
                 onLongPress={() => showTip('Chế độ biểu đồ cột')}
                 accessibilityLabel="Biểu đồ cột"
               >
-                <Icon
-                  name="bar-chart"
-                  size={18}
-                  color={chartMode === 'bar' ? '#2563EB' : '#64748B'}
-                />
+               <Image source={icBar} style={{ width: 18, height: 18, tintColor: chartMode==='bar' ? '#2563EB' : '#64748B' }} />
               </TouchableOpacity>
 
               {/* Line */}
@@ -385,11 +395,7 @@ export default function JourneyScreen({ navigateToScreen }) {
                 onLongPress={() => showTip('Chế độ biểu đồ đường')}
                 accessibilityLabel="Biểu đồ đường"
               >
-                <Icon
-                  name="show-chart"
-                  size={18}
-                  color={chartMode === 'line' ? '#2563EB' : '#64748B'}
-                />
+                 <Image source={icLine} style={{ width: 18, height: 18, tintColor: chartMode==='line' ? '#2563EB' : '#64748B' }} />
               </TouchableOpacity>
             </View>
           }
@@ -426,7 +432,7 @@ export default function JourneyScreen({ navigateToScreen }) {
                   }
                   style={s.toHistoryBtn}
                 >
-                  <Icon name="history" size={18} color="#fff" />
+                  <Image source={icHistory} style={{ width: 18, height: 18, tintColor: '#fff' }} />
                   <Text style={s.toHistoryText}>
                     {L.toHistory}: {selectedMonth}
                   </Text>
