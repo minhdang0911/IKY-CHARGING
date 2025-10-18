@@ -13,6 +13,7 @@ import {
   ToastAndroid,
   Alert,
   useWindowDimensions,
+  Image,                       // ✅ thêm Image
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -33,6 +34,10 @@ import iconsOrder from '../../assets/img/iconsOrder.png';
 import iconstation from '../../assets/img/iconstation.png';
 import iconsDevice from '../../assets/img/iconsDevice.png';
 import iconsrevenue from '../../assets/img/iconsrevenue.png';
+
+// ✅ ảnh mới cho Hi/Lo
+import icTrendUp from '../../assets/img/ic_trend_up.png';
+import icTrendDown from '../../assets/img/ic_trend_down.png';
 
 const LANG_KEY = 'app_language';
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -248,17 +253,17 @@ export default function JourneyScreen({ navigateToScreen }) {
           <>
             <View ref={chartRef} style={{ backgroundColor: '#fff', padding: 16, borderRadius: 12 }}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8 }}>
-               <FancyChart
-                mode={chartMode}
-                width={chartWidth}
-                height={280}
-                labels={revenueData.map(i => i.month)}
-                values={revenueData.map(i => i.revenue)}
-                accent="#2563EB"
-                onBarPress={i => setSelectedMonth(revenueData[i]?.month || '')}
-                tooltipMode="press"
-                alwaysShowValue={false}
-              />
+                <FancyChart
+                  mode={chartMode}
+                  width={chartWidth}
+                  height={280}
+                  labels={revenueData.map(i => i.month)}
+                  values={revenueData.map(i => i.revenue)}
+                  accent="#2563EB"
+                  onBarPress={i => setSelectedMonth(revenueData[i]?.month || '')}
+                  tooltipMode="press"
+                  alwaysShowValue={false}
+                />
               </ScrollView>
             </View>
 
@@ -273,12 +278,14 @@ export default function JourneyScreen({ navigateToScreen }) {
           </>
         )}
 
-        {/* ==== HIGH / LOW summary — 3 dòng, không bể trên iPhone ==== */}
+        {/* ==== HIGH / LOW summary (đã đổi ảnh) ==== */}
         {maxMin ? (
           <View style={[s.hiloRow, isNarrow && { flexWrap: 'wrap' }]}>
             {/* High */}
             <View style={[s.hiloBox, isNarrow ? { flexBasis:'100%' } : { flexBasis:'48%' }]}>
-              <View style={s.hiloIcon}><Icon name="trending-up" size={16} color="#0EA5E9" /></View>
+              <View style={s.hiloIconBlue}>
+                <Image source={icTrendUp} style={s.hiloImgBlue} resizeMode="contain" />
+              </View>
               <View style={{ flex:1, minWidth:0 }}>
                 <Text style={s.hiloTitle}>{L.highest}</Text>
                 <Text style={s.hiloMonth} numberOfLines={1}>{maxMin.max.month || '—'}</Text>
@@ -289,8 +296,8 @@ export default function JourneyScreen({ navigateToScreen }) {
             </View>
             {/* Low */}
             <View style={[s.hiloBox, isNarrow ? { flexBasis:'100%' } : { flexBasis:'48%' }]}>
-              <View style={[s.hiloIcon, { backgroundColor:'#FFE4E6' }]}>
-                <Icon name="trending-down" size={16} color="#EF4444" />
+              <View style={s.hiloIconRed}>
+                <Image source={icTrendDown} style={s.hiloImgRed} resizeMode="contain" />
               </View>
               <View style={{ flex:1, minWidth:0 }}>
                 <Text style={s.hiloTitle}>{L.lowest}</Text>
@@ -318,7 +325,7 @@ export default function JourneyScreen({ navigateToScreen }) {
           <View style={s.tipWrap}><Text style={s.tipText}>{tip}</Text></View>
         ) : null}
 
-        {/* Hidden ViewShot cho Mobile */}
+        {/* Hidden ViewShot cho Mobile (đã đổi ảnh) */}
         {!isWeb && (
           <View style={{ position: 'absolute', left: -9999, top: 0 }} pointerEvents="none">
             <ViewShot
@@ -361,7 +368,7 @@ export default function JourneyScreen({ navigateToScreen }) {
                 />
               </View>
 
-              {/* High/Low Summary */}
+              {/* High/Low Summary (ảnh) */}
               {maxMin ? (
                 <View style={{ flexDirection: 'row', gap: 12, marginBottom: 20 }}>
                   <View style={{
@@ -377,7 +384,7 @@ export default function JourneyScreen({ navigateToScreen }) {
                     borderColor: '#BFDBFE',
                   }}>
                     <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#3B82F6', alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon name="trending-up" size={24} color="#fff" />
+                      <Image source={icTrendUp} style={{ width:24, height:24, tintColor:'#fff' }} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 12, color: '#64748B', fontWeight: '600', marginBottom: 2 }}>
@@ -405,7 +412,7 @@ export default function JourneyScreen({ navigateToScreen }) {
                     borderColor: '#FECACA',
                   }}>
                     <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon name="trending-down" size={24} color="#fff" />
+                      <Image source={icTrendDown} style={{ width:24, height:24, tintColor:'#fff' }} />
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 12, color: '#64748B', fontWeight: '600', marginBottom: 2 }}>
@@ -546,10 +553,18 @@ const s = StyleSheet.create({
     backgroundColor:'#F8FAFC', borderRadius:14, borderWidth:1, borderColor:'#E5E7EB',
     paddingVertical:10, paddingHorizontal:12, minWidth:0,
   },
-  hiloIcon: {
-    width:28, height:28, borderRadius:999, backgroundColor:'#EAF6FF',
-    alignItems:'center', justifyContent:'center',
+  // ✅ nền icon + ảnh (xanh/đỏ)
+  hiloIconBlue: {
+    width:28, height:28, borderRadius:999,
+    backgroundColor:'#EAF6FF', alignItems:'center', justifyContent:'center',
   },
+  hiloIconRed: {
+    width:28, height:28, borderRadius:999,
+    backgroundColor:'#FFE4E6', alignItems:'center', justifyContent:'center',
+  },
+  hiloImgBlue: { width:16, height:16, tintColor:'#0EA5E9' },
+  hiloImgRed:  { width:16, height:16, tintColor:'#EF4444' },
+
   hiloTitle: { fontSize:12, color:'#64748B', fontWeight:'700' },
   hiloMonth: { fontSize:12, color:'#0F172A', fontWeight:'700' },
   hiloValue: { fontSize:16, color:'#0F172A', fontWeight:'800', marginTop:2 },

@@ -77,7 +77,7 @@ const styles = StyleSheet.create({
   },
 
   row: {
-    minHeight: 50,                 // gọn hơn
+    minHeight: 50,                 
     paddingVertical: 4,
     paddingHorizontal: 6,
     flexDirection: 'row',

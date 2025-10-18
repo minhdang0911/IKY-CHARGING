@@ -15,6 +15,9 @@ import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import logoInfo from '../../assets/img/background.png';
 import { API_URL } from '@env';
+import iconscompany from '../../assets/img/company.png';
+import iconscskh from '../../assets/img/cskh.png';
+import iconsright from '../../assets/img/ic_chevron_right.png';
 
 const LANG_KEY = 'app_language';
 
@@ -51,7 +54,7 @@ export default function InformationScreen({ logout, navigateToScreen }) {
   const { width } = useWindowDimensions();
   const isSmall = width <= 400;
   const isMedium = width <= 480;
-  const PH = isSmall ? 12 : isMedium ? 20 : 32; // padding ngang theo màn hình
+  const PH = isSmall ? 12 : isMedium ? 20 : 32;
   const bannerHeight = isSmall ? 180 : isMedium ? 240 : 280;
 
   useEffect(() => {
@@ -63,52 +66,47 @@ export default function InformationScreen({ logout, navigateToScreen }) {
     })();
   }, []);
 
- async function handleLogoutPress() {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s cho gọn
+  async function handleLogoutPress() {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-  try {
-    const [accessToken, refreshToken] = await Promise.all([
-      AsyncStorage.getItem('access_token'),
-      AsyncStorage.getItem('refresh_token'),
-    ]);
+    try {
+      const [accessToken, refreshToken] = await Promise.all([
+        AsyncStorage.getItem('access_token'),
+        AsyncStorage.getItem('refresh_token'),
+      ]);
 
-    if (accessToken) {
-      await fetch(`${API_URL}/api/auth/logout`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-        },
-        body: JSON.stringify({
-          accessToken,   // truyền vào body như m yêu cầu
-          refreshToken,  // truyền luôn refreshToken
-        }),
-        signal: controller.signal,
-      }).catch(() => {}); // kệ lỗi mạng lúc logout, vẫn dọn local
+      if (accessToken) {
+        await fetch(`${API_URL}/api/auth/logout`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          body: JSON.stringify({ accessToken, refreshToken }),
+          signal: controller.signal,
+        }).catch(() => {});
+      }
+    } finally {
+      clearTimeout(timeoutId);
+      await AsyncStorage.multiRemove([
+        'access_token',
+        'refresh_token',
+        'expires_at',
+        'user_oid',
+        'username',
+      ]);
+      logout && logout();
     }
-  } finally {
-    clearTimeout(timeoutId);
-    await AsyncStorage.multiRemove([
-      'access_token',
-      'refresh_token',
-      'expires_at',
-      'user_oid',
-      'username',
-    ]);
-    logout && logout();
   }
-}
 
   return (
     <SafeAreaView style={styles.wrap}>
-      {/* Header */}
       <View style={[styles.header, { paddingHorizontal: PH }]}>
         <Text style={styles.headerTitle}>{t('headerTitle')}</Text>
       </View>
 
-      {/* Scroll */}
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
@@ -116,7 +114,6 @@ export default function InformationScreen({ logout, navigateToScreen }) {
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Banner */}
         <View style={styles.bannerCard}>
           <Image
             source={logoInfo}
@@ -131,56 +128,30 @@ export default function InformationScreen({ logout, navigateToScreen }) {
         {/* Contact Card */}
         <View style={styles.card}>
           <View style={styles.contactRow}>
-            <Icon
-              name="person"
-              size={22}
-              color="#666"
-              style={styles.contactIconLeft}
-            />
+            <Image source={iconscskh} style={styles.contactImgLeft} resizeMode="contain" />
             <View style={styles.contactText}>
               <Text style={styles.contactLabel}>{t('cs')}</Text>
-              <Text
-                style={styles.contactPhone}
-                onPress={() => openTel('0902 806 999')}
-              >
+              <Text style={styles.contactPhone} onPress={() => openTel('0902 806 999')}>
                 0902 806 999
               </Text>
             </View>
             <TouchableOpacity onPress={() => openTel('0902 806 999')}>
-              <Icon
-                name="phone"
-                size={22}
-                color="#1e88e5"
-                style={styles.contactIconRight}
-              />
+              <Icon name="phone" size={22} color="#1e88e5" style={styles.contactIconRight} />
             </TouchableOpacity>
           </View>
 
           <View style={styles.divider} />
 
           <View style={styles.contactRow}>
-            <Icon
-              name="support-agent"
-              size={22}
-              color="#666"
-              style={styles.contactIconLeft}
-            />
+            <Image source={iconscompany} style={styles.contactImgLeft} resizeMode="contain" />
             <View style={styles.contactText}>
               <Text style={styles.contactLabel}>{t('tech')}</Text>
-              <Text
-                style={styles.contactPhone}
-                onPress={() => openTel('0938 859 085')}
-              >
+              <Text style={styles.contactPhone} onPress={() => openTel('0938 859 085')}>
                 0938 859 085
               </Text>
             </View>
             <TouchableOpacity onPress={() => openTel('0938 859 085')}>
-              <Icon
-                name="phone"
-                size={22}
-                color="#1e88e5"
-                style={styles.contactIconRight}
-              />
+              <Icon name="phone" size={22} color="#1e88e5" style={styles.contactIconRight} />
             </TouchableOpacity>
           </View>
         </View>
@@ -218,7 +189,8 @@ const MenuItem = ({ icon, text, onPress }) => (
       <Icon name={icon} size={22} color="#666" style={styles.menuIcon} />
       <Text style={styles.menuText}>{text}</Text>
     </View>
-    <Icon name="chevron-right" size={24} color="#bbb" style={styles.iconFix} />
+    {/* ✅ đổi chevron-right sang ảnh */}
+    <Image source={iconsright} style={styles.rightImg} resizeMode="contain" />
   </TouchableOpacity>
 );
 
@@ -281,11 +253,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 12,
   },
-  contactIconLeft: {
-    flexShrink: 0,
-    width: 28,
-    textAlign: 'center',
-    verticalAlign: 'middle',
+  contactImgLeft: {
+    width: 24,
+    height: 24,
+    marginRight: 8,
   },
   contactIconRight: {
     flexShrink: 0,
@@ -310,6 +281,7 @@ const styles = StyleSheet.create({
     color: '#00bcd4',
   },
   divider: { height: 1, backgroundColor: '#eee', marginVertical: 8 },
+
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -333,7 +305,13 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '500',
     lineHeight: 22,
-    whiteSpace: 'nowrap',
+  },
+  // ✅ ảnh mũi tên phải
+  rightImg: {
+    width: 18,
+    height: 18,
+    marginLeft: 8,
+    opacity: 0.7,         // giống màu #bbb của icon cũ
   },
   iconFix: { verticalAlign: 'middle' },
 });

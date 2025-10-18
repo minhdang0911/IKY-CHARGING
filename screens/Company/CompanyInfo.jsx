@@ -138,8 +138,8 @@ const CompanyInfoScreen = ({ navigateToScreen, navigation }) => {
       <View style={s.rowTextWrap}>
         <Text style={s.rowLabel}>{label}</Text>
         <Text
-          style={[s.rowValue, isLink && { textDecorationLine: 'underline', color: PRIMARY ,fontSize:12}]}
-          numberOfLines={2}
+          style={[s.rowValue, isLink && { textDecorationLine: 'underline', color: PRIMARY ,fontSize:12,whiteSpace:'nowrap'}]}
+           
           ellipsizeMode="tail"
         >
           {value}

@@ -96,7 +96,7 @@ async function doRefreshToken(navigateToScreen, { force = false } = {}) {
 
     while (true) {
       try {
-        console.log('🔄 Refreshing access token… (attempt', attempt + 1, ')');
+        // console.log('🔄 Refreshing access token… (attempt', attempt + 1, ')');
         // ✅ truyền cả refresh + access vào
         const data = await refreshAccessToken(refresh, access);
 
@@ -112,7 +112,7 @@ async function doRefreshToken(navigateToScreen, { force = false } = {}) {
         await AsyncStorage.multiSet(pairs);
 
         lastRefreshAt = Date.now();
-        console.log('✅ Refreshed OK.');
+        // console.log('✅ Refreshed OK.');
         if (data.accessToken) {
           try { sseManager.updateToken(data.accessToken); } catch {}
         }
@@ -121,7 +121,7 @@ async function doRefreshToken(navigateToScreen, { force = false } = {}) {
         const status = e?.response?.status;
         const body = e?.response?.data;
         const msg = status ? `HTTP ${status} ${JSON.stringify(body || {})}` : (e?.message || String(e));
-        console.log('❌ Refresh failed:', msg);
+        // console.log('❌ Refresh failed:', msg);
 
         // 400/401/invalid -> logout
         const lower = msg.toLowerCase();
@@ -129,7 +129,7 @@ async function doRefreshToken(navigateToScreen, { force = false } = {}) {
           || /invalid_grant|invalid refresh|expired|unauthorized|invalid_token/.test(lower);
 
         if (isAuthErr) {
-          console.log('🚪 Refresh token invalid → force logout');
+          // console.log('🚪 Refresh token invalid → force logout');
           await hardLogout(navigateToScreen);
           break;
         }
@@ -137,7 +137,7 @@ async function doRefreshToken(navigateToScreen, { force = false } = {}) {
         // 5xx / network → retry với backoff, giới hạn 3 lần
         attempt += 1;
         if (attempt >= 3) {
-          console.log('⏭️ Give up retry for now, will try again on next loop.');
+          // console.log('⏭️ Give up retry for now, will try again on next loop.');
           break;
         }
         await sleep(backoff);
@@ -158,7 +158,7 @@ function startRefreshLoopOnce(navigateToScreen) {
     try { await doRefreshToken(navigateToScreen); } catch {}
   }, LOOP_MS);
   loopArmed = true;
-  console.log(`🕒 Auto-refresh started: every ${Math.round(LOOP_MS / 60000)} minutes`);
+  // console.log(`🕒 Auto-refresh started: every ${Math.round(LOOP_MS / 60000)} minutes`);
 }
 
 const SCREEN_TO_TAB = {
@@ -225,7 +225,7 @@ export default function App() {
     if (sseHandlerAttached.current) return;
     sseHandlerAttached.current = true;
     sseManager.setAuthInvalidHandler(async () => {
-      console.log('[AUTH] SSE invalid/expired → force logout');
+      // console.log('[AUTH] SSE invalid/expired → force logout');
       await hardLogout(navRef.current);
     });
     return () => {
@@ -288,7 +288,7 @@ export default function App() {
         try { await doRefreshToken(navigateToScreen, { force: true }); } catch {}
       }
     } catch (e) {
-      console.log('⚠️ Login/refresh handling error:', e?.message);
+      // console.log('⚠️ Login/refresh handling error:', e?.message);
     }
   };
 
@@ -300,7 +300,7 @@ export default function App() {
       clearRefreshLoop();
       await AsyncStorage.multiRemove([K_ACCESS, K_REFRESH, K_EXPIRES_AT, K_USER_OID, K_USERNAME]);
     } catch (e) {
-      console.log('⚠️ Logout error:', e?.message || e);
+      // console.log('⚠️ Logout error:', e?.message || e);
     } finally {
       logout();
       hideBusy();

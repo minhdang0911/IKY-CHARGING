@@ -323,6 +323,18 @@ const fetchAllOnce = useCallback(async () => {
     }
   }, [page, totalPages, selectedMonth, search, fetchBackendPage, applyFEFilterPaginate]);
 
+
+ const handleGoTo = useCallback((targetPage) => {
+  const safe = Math.max(1, Math.min(Number(totalPages) || 1, Number(targetPage) || 1));
+  if (safe === page) return;
+  setLoading(true);
+  if (selectedMonth === 'all') {
+     fetchBackendPage(safe, search);
+  } else {
+     applyFEFilterPaginate(selectedMonth, search, safe);
+   }
+ }, [totalPages, page, selectedMonth, search, fetchBackendPage, applyFEFilterPaginate]);
+
   /* ====== tổng kWh tháng (từ allSessions, không gọi backend) ====== */
   const monthTotalKWh = useMemo(() => {
     if (selectedMonth === 'all') return 0;
@@ -579,6 +591,7 @@ const fetchAllOnce = useCallback(async () => {
                 totalPages={totalPages}
                 onPrev={handlePrev}
                 onNext={handleNext}
+                  onGoTo={handleGoTo}
               />
             </View>
           }

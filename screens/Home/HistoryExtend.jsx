@@ -77,22 +77,20 @@ export default function HistoryExtend({ navigateToScreen }) {
     return () => sub.remove();
   }, [goBack]);
 
+  // Chặn back web về root để xử lý trong app
   useEffect(() => {
-  if (Platform.OS !== 'web') return;
-  const TARGET_PATH = '/';
-  window.history.replaceState(null, '', TARGET_PATH);
-
-  const handlePopState = () => {  
+    if (Platform.OS !== 'web') return;
+    const TARGET_PATH = '/';
     window.history.replaceState(null, '', TARGET_PATH);
-    goBack(); 
-  };
-  window.history.pushState(null, '', TARGET_PATH);
-  window.addEventListener('popstate', handlePopState);
 
-  return () => {
-    window.removeEventListener('popstate', handlePopState);
-  };
-}, [goBack]);
+    const handlePopState = () => {
+      window.history.replaceState(null, '', TARGET_PATH);
+      goBack();
+    };
+    window.history.pushState(null, '', TARGET_PATH);
+    window.addEventListener('popstate', handlePopState);
+    return () => { window.removeEventListener('popstate', handlePopState); };
+  }, [goBack]);
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: (e) => e.nativeEvent.pageX <= 24,
@@ -132,7 +130,8 @@ export default function HistoryExtend({ navigateToScreen }) {
       // tính total pages nếu backend trả
       const lim = Number(res?.limit ?? res?.per_page ?? API_LIMIT) || API_LIMIT;
       const totalItems = Number(res?.total ?? 0);
-      const tp = res?.totalPages ?? res?.total_pages ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
+      const tp = res?.totalPages ?? res?.total_pages
+        ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
       setTotalPages(Math.max(1, Number(tp)));
     } catch (e) {
       setItems([]);
@@ -160,6 +159,13 @@ export default function HistoryExtend({ navigateToScreen }) {
     if (next !== page) fetchPage(next, { showSpinner: true });
   }, [page, totalPages, fetchPage]);
 
+  // ✅ go to page
+  const handleGoTo = useCallback((targetPage) => {
+    const tp = Number(totalPages) || 1;
+    const safe = Math.max(1, Math.min(tp, Number(targetPage) || 1));
+    if (safe !== page) fetchPage(safe, { showSpinner: true });
+  }, [page, totalPages, fetchPage]);
+
   // render item
   const renderItem = ({ item }) => {
     const dev = item?.device_id || {};
@@ -183,8 +189,6 @@ export default function HistoryExtend({ navigateToScreen }) {
           </View>
 
           <View style={[styles.statusPill, { backgroundColor: `${color}1A`, borderColor: color }]}>
-            {/* <Icon name="receipt-long" size={14} color={color} /> */}
-         
             <Text style={[styles.statusText, { color }]}>{viStatus(st)}</Text>
           </View>
         </View>
@@ -214,7 +218,6 @@ export default function HistoryExtend({ navigateToScreen }) {
         </View>
 
         <View style={styles.row}>
-           
           <Text style={styles.k}>Phương thức</Text>
           <Text style={styles.v}>{String(item?.payment_method || '').toUpperCase() || '—'}</Text>
         </View>
@@ -233,13 +236,13 @@ export default function HistoryExtend({ navigateToScreen }) {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={goBack} style={styles.backButton}>
-    <Text style={{fontSize: 30, color: '#fff'}}>{'‹'}</Text>
+          <Text style={{ fontSize: 30, color: '#fff' }}>{'‹'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Lịch sử đơn hàng</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      {/* chỉ giữ search */}
+      {/* Search */}
       <View style={styles.searchWrap}>
         <SearchBar
           placeholder="Tìm theo mã đơn (VD: 2509200001)"
@@ -260,7 +263,6 @@ export default function HistoryExtend({ navigateToScreen }) {
           keyExtractor={(it, idx) => String(it?._id || it?.orderId || idx)}
           renderItem={renderItem}
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-          // ✅ chừa đáy để không bị bottom tab đè và kéo tới thấy footer
           contentContainerStyle={{ padding: 16, paddingBottom: BOTTOM_PAD }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           ListEmptyComponent={
@@ -269,7 +271,6 @@ export default function HistoryExtend({ navigateToScreen }) {
               <Text style={styles.emptyText}>Không có đơn hàng phù hợp</Text>
             </View>
           }
-          // ✅ gắn paginate ở FOOTER của list để luôn nằm trong scroll
           ListFooterComponent={
             <View style={{ marginTop: 12, backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' }}>
               <PaginationControls
@@ -277,9 +278,11 @@ export default function HistoryExtend({ navigateToScreen }) {
                 totalPages={totalPages}
                 onPrev={handlePrev}
                 onNext={handleNext}
+                onGoTo={handleGoTo}   // ✅ Go to page
               />
             </View>
           }
+          showsVerticalScrollIndicator={false}
         />
       )}
     </SafeAreaView>
