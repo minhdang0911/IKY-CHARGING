@@ -337,7 +337,7 @@ const s = StyleSheet.create({
     alignSelf: 'flex-start',
   },
 
-  rowTextWrap: { flex: 1, minWidth: 0 },
+   
   rowLabel: { fontSize: 12, color: '#64748b' },
   rowValue: { fontSize: 12, color: '#0f172a', fontWeight: '600', marginTop: 2 },
   divider: { height: 1, backgroundColor: '#eef2f7' },
