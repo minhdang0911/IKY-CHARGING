@@ -1,4 +1,4 @@
-// Top-level build file where you can add configuration options common to all sub-projects/modules.
+// Top-level build file
 
 buildscript {
     ext {
@@ -6,7 +6,11 @@ buildscript {
         minSdkVersion = 23
         compileSdkVersion = 35
         targetSdkVersion = 35
-        ndkVersion = "26.1.10909125"
+
+      
+        ndkVersion = "28.0.12674087"   
+
+
         kotlinVersion = "1.9.24"
     }
     repositories {
@@ -15,12 +19,12 @@ buildscript {
         gradlePluginPortal()
     }
     dependencies {
-        classpath("com.android.tools.build:gradle:8.3.2")
+        // 🔼 AGP 8.5+ để toolchain support 16KB (tương thích Gradle 8.7+)
+        classpath("com.android.tools.build:gradle:8.5.2")
+
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion")
-
-        // ❌ Không dùng Firebase/FCM hiện tại → comment lại để tránh task processGoogleServices
-        // classpath("com.google.gms:google-services:4.4.2")
+        // classpath("com.google.gms:google-services:4.4.2") // nếu chưa dùng FCM thì cứ off
     }
 }
 

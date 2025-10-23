@@ -16,13 +16,13 @@ plugins {
     id "com.android.application"
     id "org.jetbrains.kotlin.android"
     id "com.facebook.react"
-    // ❌ Nếu không dùng Firebase thì comment lại plugin này
-    // id "com.google.gms.google-services"
+    // id "com.google.gms.google-services" // nếu dùng FCM hãy bật lại
 }
 
-react {
-    // Giữ mặc định
-}
+react { /* giữ mặc định */ }
+
+// 💡 Nếu không cần 32-bit, bỏ hẳn cho nhẹ & tránh .so cũ
+def ENABLE_32_BIT = false
 
 def enableProguardInReleaseBuilds = false
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
@@ -37,12 +37,22 @@ android {
         applicationId "com.ikycharging"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 4
-        versionName "1.3"
+        versionCode 7        // 🔼 nhớ tăng
+        versionName "1.3.4"  // 🔼 nhớ tăng
         multiDexEnabled true
 
-        // Chỉ định flavor mặc định cho react-native-camera
+        // react-native-camera legacy
         missingDimensionStrategy 'react-native-camera', 'general'
+
+        // 🧪 (tuỳ chọn) Cho native build biết hỗ trợ page size linh hoạt
+        // Với NDK r28+ thường không cần, nhưng thêm cũng vô hại:
+        externalNativeBuild {
+            cmake {
+                // Nếu project có CMake, thêm flags link 16KB cho lib tự build:
+                // cppFlags "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=1"
+                // arguments "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+            }
+        }
     }
 
     signingConfigs {
@@ -64,8 +74,6 @@ android {
 
     buildTypes {
         debug {
-            // ❌ Không dùng applicationIdSuffix để tránh lệch package name
-            // applicationIdSuffix ".debug"
             versionNameSuffix "-debug"
             debuggable true
             signingConfig signingConfigs.debug
@@ -78,20 +86,32 @@ android {
         }
     }
 
-    // Build universal APK
+    // ✅ Chỉ build 64-bit để né .so 32-bit lỗi thời (khuyến nghị)
     splits {
         abi {
             enable true
             reset()
-            include "armeabi-v7a","arm64-v8a","x86","x86_64"
+            if (ENABLE_32_BIT) {
+                include "armeabi-v7a","arm64-v8a","x86","x86_64"
+            } else {
+                include "arm64-v8a","x86_64"
+            }
             universalApk true
         }
     }
 
+    // AAB/APK không nhúng dependency info
     dependenciesInfo {
         includeInApk false
         includeInBundle false
     }
+
+    // 🧹 (tuỳ chọn) loại bỏ lib 32-bit nếu lib thứ ba vẫn kéo vào
+   packagingOptions {
+    jniLibs {
+        excludes += ["**/armeabi/**", "**/armeabi-v7a/**", "**/x86/**"]
+    }
+}
 }
 
 configurations.all {
@@ -106,11 +126,8 @@ dependencies {
     implementation("androidx.core:core:1.12.0")
     implementation("androidx.core:core-ktx:1.12.0")
 
-    // Giữ lại nếu dùng location
     implementation("com.google.android.gms:play-services-location:20.0.0")
-
-    // ❌ Comment nếu chưa dùng FCM
-    // implementation("com.google.firebase:firebase-messaging:23.4.0")
+    // implementation("com.google.firebase:firebase-messaging:23.4.0") // nếu dùng FCM thì bật
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
@@ -120,7 +137,6 @@ dependencies {
 }
 
 apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")
-
-// Autolink RN native modules
 apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle");
 applyNativeModulesAppBuildGradle(project)
+
