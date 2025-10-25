@@ -1,21 +1,30 @@
-// screens/Home/ChargingSession.jsx (WEB ONLY, FE paginate when month filter is active)
+// screens/Home/ChargingSession.jsx
+// WEB ONLY – FE paginate khi bật filter theo month/port/date
+// Version pro: summary kWh, export Excel chuẩn doanh nghiệp, sheet theo tháng, info đại lý
+
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  SafeAreaView, View, Text, StyleSheet, TouchableOpacity, FlatList,
-  RefreshControl, ActivityIndicator, BackHandler, PanResponder,
-  Pressable, ScrollView,
+  SafeAreaView, View, Text, StyleSheet, TouchableOpacity,
+  FlatList, RefreshControl, BackHandler, PanResponder, Platform
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import { getSessions } from '../../apis/devices';
 import SearchBar from '../../components/SearchBar';
 import PaginationControls from '../../components/PaginationControls';
+import WebFilters from '../../components/WebFilters';
 
-// Excel export
+// lấy info đại lý
+import useLanguage from '../../Hooks/useLanguage';
+import useAgentInfo from '../../Hooks/useAgentInfo';
+import { STRINGS } from '../../i18n/strings';
+
+// Excel export libs
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
 
-/* ================= helpers ================= */
+/* =============== helpers chung =============== */
 const TAB_BAR_HEIGHT = 72;
 const BOTTOM_PAD = TAB_BAR_HEIGHT + 36;
 
@@ -55,160 +64,405 @@ function fmt(dt) {
   } catch { return '—'; }
 }
 
+function onlyDateStr(dt) {
+  if (!dt) return '—';
+  try {
+    const d = new Date(dt);
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${dd}/${mm}/${yyyy}`;
+  } catch { return '—'; }
+}
+
 function monthKey(dt) {
   if (!dt) return null;
   const d = new Date(dt);
   if (Number.isNaN(d.getTime())) return null;
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, '0');
-  return `${yyyy}-${mm}`; // 2025-10
+  return `${yyyy}-${mm}`; // "2025-10"
 }
+
 function monthLabelDash(key) {
   if (!key || key === 'all') return 'all';
   const [y, m] = key.split('-');
-  return `${m}-${y}`; // 10-2025 (để Excel không auto-format)
+  return `${m}-${y}`; // ví dụ "10-2025"
 }
-function monthLabelSlash(key) {
-  if (!key || key === 'all') return 'Tất cả (trang hiện tại)';
+
+function monthLabelPretty(key) {
+  if (!key || key === 'all') return 'Toàn bộ';
   const [y, m] = key.split('-');
-  return `${m}/${y}`;
+  return `Tháng ${m}/${y}`;
 }
 
-/* ===================== MonthDropdown ===================== */
-function MonthDropdown({ options, value, onChange }) {
-  const [open, setOpen] = useState(false);
-  const toggle = useCallback(() => setOpen(v => !v), []);
-  const close = useCallback(() => setOpen(false), []);
-
-  return (
-    <View style={styles.ddWrapWeb}>
-      <TouchableOpacity style={styles.ddButton} onPress={toggle} activeOpacity={0.9}>
-        <Text style={styles.ddButtonText}>{monthLabelSlash(value)}</Text>
-      </TouchableOpacity>
-
-      {open && (
-        <>
-          <Pressable onPress={close} style={styles.popoverBackdrop} />
-          <View style={styles.popoverPanel}>
-            <View style={styles.ddHeader}>
-              <Text style={styles.ddTitle}>Chọn tháng</Text>
-              <TouchableOpacity onPress={close} style={styles.ddClose}>
-                <Icon name="close" size={18} color="#6B7280" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={{ maxHeight: 320 }}>
-              {['all', ...options].map((k) => {
-                const active = value === k;
-                return (
-                  <TouchableOpacity
-                    key={k}
-                    onPress={() => { onChange(k); close(); }}
-                    style={[styles.ddItem, active && styles.ddItemActive]}
-                    activeOpacity={0.9}
-                  >
-                    <Text style={[styles.ddItemText, active && styles.ddItemTextActive]}>
-                      {k === 'all' ? 'Tất cả (trang hiện tại)' : monthLabelSlash(k)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </>
-      )}
-    </View>
-  );
+function isInRange(dt, from, to) {
+  const d = new Date(dt);
+  if (Number.isNaN(d.getTime())) return false;
+  if (from && d < from) return false;
+  if (to && d > to) return false;
+  return true;
 }
 
-/* ===================== Screen ===================== */
+// ngày nhanh
+function startOfDayLocal(d = new Date()) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0,0,0,0);
+}
+function endOfDayLocal(d = new Date()) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23,59,59,999);
+}
+
+// năng lượng kWh an toàn
+function getEnergyKwh(it) {
+  const raw = it?.energy_used_kwh ?? it?.energy_kwh ?? it?.energy ?? 0;
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : 0;
+}
+
+/* =============== Excel helpers chuyên nghiệp =============== */
+
+// gom theo thiết bị để làm sheet summary thiết bị
+function groupByDevice(sessions) {
+  const map = new Map(); // key: device name -> {kwhTotal, count}
+  for (const s of sessions) {
+    const devName = s?.device_id?.name || 'Không rõ thiết bị';
+    const prev = map.get(devName) || { kwhTotal: 0, count: 0 };
+    prev.kwhTotal += getEnergyKwh(s);
+    prev.count += 1;
+    map.set(devName, prev);
+  }
+
+  let grandTotal = 0;
+  for (const [, val] of map) grandTotal += val.kwhTotal;
+
+  const rows = [];
+  for (const [name, val] of map) {
+    const pct = grandTotal > 0 ? (val.kwhTotal / grandTotal) * 100 : 0;
+    rows.push({
+      'Thiết bị': name,
+      'Số phiên': val.count,
+      'Tổng kWh': Number(val.kwhTotal.toFixed(3)),
+      'Tỉ lệ (%)': Number(pct.toFixed(2)),
+    });
+  }
+
+  rows.sort((a, b) => b['Tổng kWh'] - a['Tổng kWh']);
+
+  return { rows, grandTotal: Number(grandTotal.toFixed(3)) };
+}
+
+// group theo tháng -> { '2025-10': { rows: [...], totalKwh: number } }
+function groupByMonth(sessions) {
+  const bucket = new Map();
+
+  for (const it of sessions) {
+    const key = monthKey(it?.startTime || it?.endTime);
+    if (!key) continue; // 🔥 bỏ qua record không có start/endTime hợp lệ
+
+    const arr = bucket.get(key) || [];
+    arr.push(it);
+    bucket.set(key, arr);
+  }
+
+  const result = [];
+  for (const [key, arr] of bucket.entries()) {
+    let kwhSum = 0;
+    const detailRows = arr.map((it, idx) => {
+      kwhSum += getEnergyKwh(it);
+      return {
+        'STT': idx + 1,
+        'Mã đơn': String(it?.order_id ?? ''),
+        'Thiết bị': String(it?.device_id?.name ?? ''),
+        'Cổng': String(it?.portNumber ?? ''),
+        'Bắt đầu': fmt(it?.startTime),
+        'Kết thúc': fmt(it?.endTime),
+        'Năng lượng (kWh)': Number(getEnergyKwh(it).toFixed(3)),
+        'Trạng thái': viStatus(it?.status),
+      };
+    });
+
+    result.push({
+      monthKey: key,
+      monthLabel: monthLabelPretty(key),
+      totalKwh: Number(kwhSum.toFixed(3)),
+      detailRows,
+    });
+  }
+
+  result.sort((a, b) => (a.monthKey > b.monthKey ? -1 : 1));
+  return result;
+}
+
+// build workbook => trả về XLSX workbook
+function buildWorkbookPro({
+  sessions,
+  summaryLabel,        // ví dụ "Tháng 10/2025" hoặc "Toàn bộ dữ liệu"
+  totalKwhFiltered,    // tổng kWh filter hiện tại
+  reportDate = new Date(),
+  companyName = 'IKY Smart Utility',
+  authorName = 'Hệ thống',
+  agentInfo,           // thông tin đại lý
+  selectedMonthForExport, // string 'YYYY-MM' hoặc 'all'
+}) {
+  // ===== Sheet "Tong_quan" =====
+  const dateStr = `${String(reportDate.getDate()).padStart(2,'0')}/${String(reportDate.getMonth()+1).padStart(2,'0')}/${reportDate.getFullYear()}`;
+
+  const overviewAOA = [
+    ['BÁO CÁO NĂNG LƯỢNG SẠC'],
+    [companyName],
+    [''],
+    ['Thời gian báo cáo', summaryLabel],
+    ['Ngày lập báo cáo', dateStr],
+    ['Người lập báo cáo', authorName],
+    ['Đại lý', agentInfo?.name || '—'],
+    ['SĐT đại lý', agentInfo?.phone || '—'],
+    ['Email đại lý', agentInfo?.email || '—'],
+    ['Khu vực', agentInfo?.address || agentInfo?.province || '—'],
+    [''],
+    ['Tổng số phiên sạc', sessions.length],
+    ['Tổng năng lượng (kWh)', Number(totalKwhFiltered.toFixed(3))],
+    ['Chú ý', 'Dữ liệu được tổng hợp tự động từ hệ thống sạc EV. Các giá trị kWh dùng cho vận hành & đối soát.'],
+  ];
+
+  const wsOverview = XLSX.utils.aoa_to_sheet(overviewAOA);
+
+  // merge tiêu đề cho đẹp
+  wsOverview['!merges'] = [
+    { s: { r:0, c:0 }, e: { r:0, c:1 } },
+    { s: { r:1, c:0 }, e: { r:1, c:1 } },
+  ];
+
+  wsOverview['!cols'] = [
+    { wch: 28 },
+    { wch: 50 },
+  ];
+
+  // ===== Sheet "Chi_tiet" (full list theo filter) =====
+  const detailRows = sessions.map((it, idx) => ({
+    'STT': idx + 1,
+    'Mã đơn': String(it?.order_id ?? ''),
+    'Thiết bị': String(it?.device_id?.name ?? ''),
+    'Cổng': String(it?.portNumber ?? ''),
+    'Ngày': onlyDateStr(it?.startTime),
+    'Bắt đầu': fmt(it?.startTime),
+    'Kết thúc': fmt(it?.endTime),
+    'Năng lượng (kWh)': Number(getEnergyKwh(it).toFixed(3)),
+    'Trạng thái': viStatus(it?.status),
+  }));
+
+  const wsDetail = XLSX.utils.json_to_sheet(detailRows, {
+    header: [
+      'STT',
+      'Mã đơn',
+      'Thiết bị',
+      'Cổng',
+      'Ngày',
+      'Bắt đầu',
+      'Kết thúc',
+      'Năng lượng (kWh)',
+      'Trạng thái',
+    ]
+  });
+
+  wsDetail['!cols'] = [
+    { wch: 6  },
+    { wch: 14 },
+    { wch: 22 },
+    { wch: 8  },
+    { wch: 12 },
+    { wch: 20 },
+    { wch: 20 },
+    { wch: 18 },
+    { wch: 14 },
+  ];
+
+  // thêm dòng tổng cuối sheet Chi_tiet
+  const detRange = XLSX.utils.decode_range(wsDetail['!ref']);
+  const totalRowIdx = detRange.e.r + 2;
+  XLSX.utils.sheet_add_aoa(wsDetail, [
+    ['TỔNG KWH (lọc hiện tại)', null, null, null, null, null, null, Number(totalKwhFiltered.toFixed(3)), null]
+  ], { origin: `A${totalRowIdx}` });
+
+  // ===== Sheet "Thiet_bi" =====
+  const { rows: deviceRows, grandTotal } = groupByDevice(sessions);
+  const wsDevice = XLSX.utils.json_to_sheet(deviceRows, {
+    header: ['Thiết bị','Số phiên','Tổng kWh','Tỉ lệ (%)']
+  });
+
+  wsDevice['!cols'] = [
+    { wch: 32 },
+    { wch: 10 },
+    { wch: 14 },
+    { wch: 10 },
+  ];
+
+  const devRange = XLSX.utils.decode_range(wsDevice['!ref']);
+  const devTotalRow = devRange.e.r + 2;
+  XLSX.utils.sheet_add_aoa(wsDevice, [
+    ['TỔNG', sessions.length, Number(grandTotal.toFixed(3)), '100.00']
+  ], { origin: `A${devTotalRow}` });
+
+  // ===== Sheet theo tháng =====
+  // - Nếu đang chọn 1 tháng cụ thể => chỉ xuất đúng tháng đó
+  // - Nếu đang ở all => xuất tất cả tháng có data (mỗi tháng 1 sheet riêng)
+
+  const monthBuckets = groupByMonth(sessions);
+  // monthBuckets = [{monthKey, monthLabel, totalKwh, detailRows:[...]}, ...]
+
+  // Chuẩn bị workbook
+  const wb = XLSX.utils.book_new();
+
+  XLSX.utils.book_append_sheet(wb, wsOverview, 'Tong_quan');
+  XLSX.utils.book_append_sheet(wb, wsDetail, 'Chi_tiet');
+  XLSX.utils.book_append_sheet(wb, wsDevice, 'Thiet_bi');
+
+  // tạo sheet cho từng tháng
+  for (const bucket of monthBuckets) {
+    // nếu user chọn 1 tháng cụ thể thì bỏ qua tháng khác
+    if (selectedMonthForExport !== 'all' && bucket.monthKey !== selectedMonthForExport) continue;
+
+    // header tháng
+    const monthHeaderAOA = [
+      [`BÁO CÁO THÁNG ${bucket.monthLabel}`],
+      [`Tổng năng lượng tháng`, bucket.totalKwh],
+      [''],
+    ];
+
+    // convert detailRows -> sheet tạm
+    const wsTmp = XLSX.utils.json_to_sheet(bucket.detailRows, {
+      header: [
+        'STT',
+        'Mã đơn',
+        'Thiết bị',
+        'Cổng',
+        'Bắt đầu',
+        'Kết thúc',
+        'Năng lượng (kWh)',
+        'Trạng thái',
+      ]
+    });
+
+    // shift nội dung wsTmp xuống dưới phần header
+    //  - ta build final sheet aoa_to_sheet rồi paste
+    const wsMonth = XLSX.utils.aoa_to_sheet(monthHeaderAOA);
+
+    // lấy AOA từ wsTmp
+    const tmpAOA = XLSX.utils.sheet_to_json(wsTmp, { header: 1 });
+    XLSX.utils.sheet_add_aoa(wsMonth, tmpAOA, { origin: `A4` });
+
+    // autofit
+    wsMonth['!cols'] = [
+      { wch: 6  }, // STT
+      { wch: 14 }, // Mã đơn
+      { wch: 22 }, // Thiết bị
+      { wch: 8  }, // Cổng
+      { wch: 20 }, // Bắt đầu
+      { wch: 20 }, // Kết thúc
+      { wch: 18 }, // Năng lượng
+      { wch: 14 }, // Trạng thái
+    ];
+
+    // merge cell cho dòng title
+    wsMonth['!merges'] = [
+      { s: { r:0, c:0 }, e: { r:0, c:7 } }, // "BÁO CÁO THÁNG ..."
+    ];
+
+    // tên sheet = "10-2025" kiểu ngắn gọn
+    const sheetName = monthLabelDash(bucket.monthKey); // "10-2025"
+    XLSX.utils.book_append_sheet(wb, wsMonth, sheetName.slice(0,31)); // excel limit 31 char
+  }
+
+  return wb;
+}
+
+/* =============== Component Screen =============== */
 export default function ChargingSession({ navigateToScreen }) {
-  // back handlers
-  const goBack = useCallback(() => {
-    if (navigateToScreen) navigateToScreen('Device');
-    return true;
-  }, [navigateToScreen]);
+  // ===== lấy ngôn ngữ + agent info (đại lý) =====
+  const { language } = useLanguage('vi');
+  const t = useCallback(
+    (k) =>
+      (STRINGS[language] && STRINGS[language][k]) ??
+      STRINGS.vi?.[k] ??
+      STRINGS.en?.[k] ??
+      k,
+    [language]
+  );
+
+  const { agentInfo } = useAgentInfo([language]);
+
+  // ===== back/nav =====
+  const goBack = useCallback(() => { navigateToScreen?.('Device'); return true; }, [navigateToScreen]);
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', goBack);
     return () => sub.remove();
   }, [goBack]);
 
-  const panResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: (e) => e.nativeEvent.pageX <= 24,
-        onMoveShouldSetPanResponder: (e, g) =>
-          e.nativeEvent.pageX <= 24 && Math.abs(g.dx) > 8,
-        onPanResponderRelease: (e, g) => {
-          if (g.dx > 60 && Math.abs(g.dy) < 40) goBack();
-        },
-      }),
-    [goBack]
-  );
+  const panResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: (e) => e.nativeEvent.pageX <= 24,
+    onMoveShouldSetPanResponder: (e, g) => e.nativeEvent.pageX <= 24 && Math.abs(g.dx) > 8,
+    onPanResponderRelease: (e, g) => { if (g.dx > 60 && Math.abs(g.dy) < 40) goBack(); },
+  }), [goBack]);
 
-  /* ====== states ====== */
+  // ===== state chính =====
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
-
-  const [items, setItems] = useState([]);        // danh sách hiển thị (đã cắt trang, tuỳ mode)
+  const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [search, setSearch] = useState('');  // mã đơn
-  const [selectedMonth, setSelectedMonth] = useState('all');
+  const [search, setSearch] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState('all'); // 'YYYY-MM' | 'all'
+  const [selectedPort, setSelectedPort] = useState('all');
+  const [monthOptions, setMonthOptions] = useState([]);
+  const [portOptions, setPortOptions] = useState([]);
 
-  // cache toàn bộ dữ liệu để FE filter khi chọn tháng
-  const [allSessions, setAllSessions] = useState([]);      // dữ liệu ALL (load 1 lần, không params)
-  const [allReady, setAllReady] = useState(false);         // cờ đã có all
-  const [monthOptions, setMonthOptions] = useState([]);    // extract từ allSessions
+  const [dateFromStr, setDateFromStr] = useState('');
+  const [dateToStr, setDateToStr] = useState('');
+  const dateFrom = useMemo(() => (dateFromStr ? new Date(dateFromStr) : null), [dateFromStr]);
+  const dateTo   = useMemo(() => (dateToStr   ? new Date(dateToStr)   : null), [dateToStr]);
 
-  /* ====== boot: fetch ALL (no params) để dùng cho filter theo tháng ====== */
- // Gom toàn bộ sessions (loop qua tất cả trang) để dùng cho filter theo tháng
-const fetchAllOnce = useCallback(async () => {
-  try {
-    const token = await getAccessTokenSafe();
+  // cache ALL để FE filter
+  const [allSessions, setAllSessions] = useState([]);
+  const [allReady, setAllReady] = useState(false);
 
-    // dùng limit lớn để giảm số lần gọi
-    const HARD_LIMIT = 20000;
-    let p = 1, tp = 1;
-    const all = [];
+  const isFEFilter = useMemo(
+    () => selectedMonth !== 'all' || selectedPort !== 'all' || !!dateFrom || !!dateTo || search.trim().length > 0,
+    [selectedMonth, selectedPort, dateFrom, dateTo, search]
+  );
 
-    do {
-      const res = await getSessions(token, { page: p, limit: HARD_LIMIT });
+  // load ALL 1 lần
+  const fetchAllOnce = useCallback(async () => {
+    try {
+      const token = await getAccessTokenSafe();
+      const res = await getSessions(token, { page: 1, limit: 20000 });
       const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
-      all.push(...list);
+      setAllSessions(list);
 
-      // tính tổng trang từ response hiện có
-      const lim = Number(res?.limit ?? res?.per_page ?? HARD_LIMIT) || HARD_LIMIT;
-      const totalItems = Number(res?.total ?? 0);
-      tp = res?.totalPages ?? res?.total_pages
-        ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
+      const mset = new Set();
+      const pset = new Set();
+      list.forEach(it => {
+        const mk = monthKey(it?.startTime || it?.endTime); if (mk) mset.add(mk);
+        if (it?.portNumber != null) pset.add(String(it.portNumber));
+      });
 
-      p += 1;
-    } while (p <= tp);
+      setMonthOptions(
+        [...mset]
+          .filter(k => !!k && k !== 'all')
+          .map(k => ({ key: k, label: monthLabelDash(k) }))
+          .sort((a, b) => (a.key > b.key ? -1 : 1))
+      );
 
-    setAllSessions(all);
-
-    const keys = new Set();
-    for (const it of all) {
-      const mk = monthKey(it?.startTime || it?.endTime);
-      if (mk) keys.add(mk);
+      setPortOptions([...pset].map(Number).sort((a, b) => a - b));
+      setAllReady(true);
+    } catch {
+      setAllSessions([]);
+      setAllReady(true);
     }
-    const arr = Array.from(keys).sort((a, b) => (a > b ? -1 : 1));
-    setMonthOptions(arr);
-    setAllReady(true);
-  } catch (e) {
-    console.warn('Lỗi load ALL sessions:', e?.message || e);
-    setAllSessions([]);
-    setMonthOptions([]);
-    setAllReady(true);
-  }
-}, []);
+  }, []);
 
-
-  /* ====== backend paginate khi Tháng = Tất cả ====== */
+  // gọi BE paginate mặc định
   const fetchBackendPage = useCallback(async (p = 1, q = '') => {
     setLoading(true);
     try {
@@ -216,19 +470,16 @@ const fetchAllOnce = useCallback(async () => {
       const params = { page: p, limit };
       if (q.trim()) params.search = q.trim();
       const res = await getSessions(token, params);
-
       const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
       setItems(list);
 
-      // backend total pages fallback
       const lim = Number(res?.limit ?? res?.per_page ?? limit) || limit;
       const totalItems = Number(res?.total ?? 0);
       const tp = res?.totalPages ?? res?.total_pages
         ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
       setTotalPages(Math.max(1, Number(tp)));
       setPage(res?.page || p);
-    } catch (e) {
-      console.warn('Lỗi lấy trang backend:', e?.message || e);
+    } catch {
       setItems([]);
       setTotalPages(1);
       setPage(1);
@@ -237,244 +488,255 @@ const fetchAllOnce = useCallback(async () => {
     }
   }, [limit]);
 
-  /* ====== FE filter + paginate khi chọn Tháng ====== */
+  // FE filter paginate
   const applyFEFilterPaginate = useCallback((targetMonth, q, p = 1) => {
-  let base = allSessions;
-  if (targetMonth !== 'all') {
-    base = base.filter(it => monthKey(it?.startTime || it?.endTime) === targetMonth);
-  }
-  if (q.trim()) {
-    const needle = q.trim().toLowerCase();
-    base = base.filter(it => String(it?.order_id || '').toLowerCase().includes(needle));
-  }
-  const tp = Math.max(1, Math.ceil(base.length / limit));
-  const safePage = Math.min(Math.max(1, p), tp);
-  const start = (safePage - 1) * limit;
-  setItems(base.slice(start, start + limit));
-  setTotalPages(tp);
-  setPage(safePage);
-  setLoading(false);
-}, [allSessions, limit]);
+    let base = allSessions.slice();
 
+    if (targetMonth !== 'all')
+      base = base.filter(it => monthKey(it?.startTime || it?.endTime) === targetMonth);
 
-  /* ====== orchestrate theo selectedMonth ====== */
-  // load ALL ngay từ đầu (1 lần)
- 
+    if (selectedPort !== 'all')
+      base = base.filter(it => String(it?.portNumber ?? '') === String(selectedPort));
 
-  // khi vào trang lần đầu: nếu đang TẤT CẢ → gọi backend paginate trang 1
+    if (dateFrom || dateTo)
+      base = base.filter(it =>
+        isInRange(it?.startTime, dateFrom, dateTo) ||
+        isInRange(it?.endTime, dateFrom, dateTo)
+      );
+
+    if (q?.trim()) {
+      const needle = q.trim().toLowerCase();
+      base = base.filter(it => String(it?.order_id || '').toLowerCase().includes(needle));
+    }
+
+    const tp = Math.max(1, Math.ceil(base.length / limit));
+    const safe = Math.min(Math.max(1, p), tp);
+
+    setItems(base.slice((safe - 1) * limit, safe * limit));
+    setTotalPages(tp);
+    setPage(safe);
+    setLoading(false);
+  }, [allSessions, limit, selectedPort, dateFrom, dateTo]);
+
+  // dispatcher fetch/filter
+  const runFilterOrFetch = useCallback((targetPage = 1) => {
+    if (isFEFilter) {
+      applyFEFilterPaginate(selectedMonth, search, targetPage);
+    } else {
+      fetchBackendPage(targetPage, search);
+    }
+  }, [isFEFilter, applyFEFilterPaginate, selectedMonth, search, fetchBackendPage]);
+
+  // init load all
+  useEffect(() => { fetchAllOnce(); }, [fetchAllOnce]);
+
+  // rerun khi filter đổi
   useEffect(() => {
-    if (selectedMonth === 'all') {
-      fetchBackendPage(1, search);
-    } else {
-      // khi chuyển sang filter theo tháng → dùng FE paginate
-      setLoading(true);
-      applyFEFilterPaginate(selectedMonth, search, 1);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMonth]);
-
-
-   useEffect(() => { fetchAllOnce(); }, []);
-
-  // thao tác search
-  const doSearch = useCallback(() => {
     setLoading(true);
-    if (selectedMonth === 'all') {
-      fetchBackendPage(1, search);
-    } else {
-      applyFEFilterPaginate(selectedMonth, search, 1);
-    }
-  }, [selectedMonth, search, fetchBackendPage, applyFEFilterPaginate]);
+    const t = setTimeout(() => { runFilterOrFetch(1); }, 250);
+    return () => clearTimeout(t);
+  }, [selectedMonth, selectedPort, dateFromStr, dateToStr, search, runFilterOrFetch]);
 
-  // pull-to-refresh
+  // refresh
+  const [refreshingState, setRefreshingState] = useState(false);
   const onRefresh = useCallback(async () => {
-    setRefreshing(true);
+    setRefreshingState(true);
     try {
-      // refresh cả 2 nguồn
       await fetchAllOnce();
-      if (selectedMonth === 'all') {
-        await fetchBackendPage(page, search);
-      } else {
-        applyFEFilterPaginate(selectedMonth, search, page);
-      }
-    } finally { setRefreshing(false); }
-  }, [fetchAllOnce, fetchBackendPage, applyFEFilterPaginate, selectedMonth, page, search]);
+      runFilterOrFetch(page);
+    } finally { setRefreshingState(false); }
+  }, [fetchAllOnce, runFilterOrFetch, page]);
 
-  // prev/next
+  // pager
   const handlePrev = useCallback(() => {
     const next = Math.max(1, page - 1);
-    if (next === page) return;
-    setLoading(true);
-    if (selectedMonth === 'all') {
-      fetchBackendPage(next, search);
-    } else {
-      applyFEFilterPaginate(selectedMonth, search, next);
-    }
-  }, [page, selectedMonth, search, fetchBackendPage, applyFEFilterPaginate]);
+    if (next !== page) { setLoading(true); runFilterOrFetch(next); }
+  }, [page, runFilterOrFetch]);
 
   const handleNext = useCallback(() => {
     const next = Math.min(totalPages, page + 1);
-    if (next === page) return;
-    setLoading(true);
-    if (selectedMonth === 'all') {
-      fetchBackendPage(next, search);
-    } else {
-      applyFEFilterPaginate(selectedMonth, search, next);
+    if (next !== page) { setLoading(true); runFilterOrFetch(next); }
+  }, [page, totalPages, runFilterOrFetch]);
+
+  const handleGoTo = useCallback((targetPage) => {
+    const safe = Math.max(1, Math.min(Number(totalPages) || 1, Number(targetPage) || 1));
+    if (safe !== page) { setLoading(true); runFilterOrFetch(safe); }
+  }, [totalPages, page, runFilterOrFetch]);
+
+  /* ====== DỮ LIỆU THỐNG KÊ KWH (FULL FILTER, KO PHÂN TRANG) ====== */
+  const filteredAllForStats = useMemo(() => {
+    let base = allSessions.slice();
+
+    if (selectedMonth !== 'all') {
+      base = base.filter(
+        it => monthKey(it?.startTime || it?.endTime) === selectedMonth
+      );
     }
-  }, [page, totalPages, selectedMonth, search, fetchBackendPage, applyFEFilterPaginate]);
 
-
- const handleGoTo = useCallback((targetPage) => {
-  const safe = Math.max(1, Math.min(Number(totalPages) || 1, Number(targetPage) || 1));
-  if (safe === page) return;
-  setLoading(true);
-  if (selectedMonth === 'all') {
-     fetchBackendPage(safe, search);
-  } else {
-     applyFEFilterPaginate(selectedMonth, search, safe);
-   }
- }, [totalPages, page, selectedMonth, search, fetchBackendPage, applyFEFilterPaginate]);
-
-  /* ====== tổng kWh tháng (từ allSessions, không gọi backend) ====== */
-  const monthTotalKWh = useMemo(() => {
-    if (selectedMonth === 'all') return 0;
-    let total = 0;
-    for (const it of allSessions) {
-      if (monthKey(it?.startTime || it?.endTime) === selectedMonth) {
-        const kwh = Number(it?.energy_used_kwh ?? it?.energy_kwh ?? it?.energy ?? 0);
-        if (Number.isFinite(kwh)) total += kwh;
-      }
+    if (selectedPort !== 'all') {
+      base = base.filter(
+        it => String(it?.portNumber ?? '') === String(selectedPort)
+      );
     }
-    return total;
-  }, [selectedMonth, allSessions]);
 
-  /* ========== Export Excel (đa sheet + tổng) ========== */
-  const ensureAllData = useCallback(async () => {
-    if (allReady) return allSessions;
-    try {
-      const token = await getAccessTokenSafe();
-      const res = await getSessions(token); // không params
-      const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
-      return list;
-    } catch {
-      // fallback: lặp trang nếu server không trả all
-      const token = await getAccessTokenSafe();
-      let p = 1, tp = 1;
-      const out = [];
-      do {
-        const res = await getSessions(token, { page: p, limit: 100 });
-        const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
-        out.push(...list);
-        const lim = Number(res?.limit ?? 100) || 100;
-        const totalItems = Number(res?.total ?? 0);
-        tp = res?.totalPages ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
-        p++;
-      } while (p <= tp);
-      return out;
+    if (dateFrom || dateTo) {
+      base = base.filter(it =>
+        isInRange(it?.startTime, dateFrom, dateTo) ||
+        isInRange(it?.endTime, dateFrom, dateTo)
+      );
     }
-  }, [allReady, allSessions]);
 
-  const toRow = (it) => ({
-    'Mã đơn': String(it?.order_id ?? ''),
-    'Thiết bị': String(it?.device_id?.name ?? ''),
-    'Cổng': String(it?.portNumber ?? ''),
-    'Trạng thái': viStatus(it?.status),
-    'Bắt đầu': fmt(it?.startTime),
-    'Kết thúc': fmt(it?.endTime),
-    'Năng lượng (kWh)': Number(it?.energy_used_kwh ?? it?.energy_kwh ?? it?.energy ?? 0),
-    'Tháng': monthLabelDash(monthKey(it?.startTime || it?.endTime)),
-  });
-  const autoCols = (headers) => headers.map(w => ({ wch: w }));
+    if (search?.trim()) {
+      const needle = search.trim().toLowerCase();
+      base = base.filter(
+        it => String(it?.order_id || '').toLowerCase().includes(needle)
+      );
+    }
 
+    return base;
+  }, [allSessions, selectedMonth, selectedPort, dateFrom, dateTo, search]);
+
+  const totalKwhFiltered = useMemo(() => {
+    let sum = 0;
+    for (const it of filteredAllForStats) sum += getEnergyKwh(it);
+    return Number(sum.toFixed(2));
+  }, [filteredAllForStats]);
+
+  const summaryLabel = useMemo(() => {
+    if (selectedMonth !== 'all') {
+      return monthLabelPretty(selectedMonth); // "Tháng 10/2025"
+    }
+    if (dateFrom && dateTo) {
+      return `Từ ${fmt(dateFrom)} đến ${fmt(dateTo)}`;
+    }
+    if (dateFrom && !dateTo) {
+      return `Từ ${fmt(dateFrom)} đến nay`;
+    }
+    if (!dateFrom && dateTo) {
+      return `Đến ${fmt(dateTo)}`;
+    }
+    return 'Toàn bộ dữ liệu';
+  }, [selectedMonth, dateFrom, dateTo]);
+
+  /* ===== xuất Excel chuyên nghiệp ===== */
   const exportExcel = useCallback(async () => {
     try {
-      const data = await ensureAllData();
+      const dataForReport = allReady ? allSessions : items;
 
-      // nhóm theo tháng + tổng
-      const monthMap = new Map();
-      const monthTotals = new Map();
-      for (const it of data) {
-        const key = monthKey(it?.startTime || it?.endTime);
-        if (!key) continue;
-        const row = toRow(it);
-        if (!monthMap.has(key)) monthMap.set(key, []);
-        monthMap.get(key).push(row);
-        const kwh = Number(row['Năng lượng (kWh)'] || 0);
-        monthTotals.set(key, (monthTotals.get(key) || 0) + (Number.isFinite(kwh) ? kwh : 0));
-      }
-
-      const wb = XLSX.utils.book_new();
-
-      // Sheet "Tong"
-      const sums = Array.from(monthTotals.entries())
-        .sort((a, b) => (a[0] > b[0] ? -1 : 1))
-        .map(([k, v]) => ({ 'Tháng': monthLabelDash(k), 'Tổng kWh': Number(v.toFixed(3)) }));
-      const wsSum = XLSX.utils.json_to_sheet(sums.length ? sums : [{ 'Tháng': '-', 'Tổng kWh': 0 }]);
-      wsSum['!cols'] = autoCols([12, 14]);
-
-      const totalRows = data.map(toRow);
-      const wsDetail = XLSX.utils.json_to_sheet(totalRows);
-      wsDetail['!cols'] = autoCols([14, 22, 8, 12, 19, 19, 16, 10]);
-
-      const sumRange = XLSX.utils.decode_range(wsSum['!ref'] || 'A1:A1');
-      const sumRows = (sumRange.e.r - sumRange.s.r + 1) || 1;
-      const wsTong = {};
-      wsTong['A1'] = { t: 's', v: 'Tổng kWh theo tháng' };
-
-      // shift wsSum xuống 1 hàng
-      const shifted = {};
-      Object.keys(wsSum).forEach((addr) => {
-        if (addr[0] === '!') return;
-        const cell = wsSum[addr];
-        const { r, c } = XLSX.utils.decode_cell(addr);
-        shifted[XLSX.utils.encode_cell({ r: r + 1, c })] = cell;
+      const wb = buildWorkbookPro({
+        sessions: dataForReport,
+        summaryLabel,
+        totalKwhFiltered,
+        reportDate: new Date(),
+        companyName: 'CÔNG TY CỔ PHẦN CÔNG NGHỆ TIỆN ÍCH THÔNG MINH',
+        authorName: agentInfo?.name || 'Hệ thống',         // ai lập báo cáo -> đại lý
+        agentInfo,
+        selectedMonthForExport: selectedMonth,            // để quyết định sheet theo tháng
       });
-      Object.keys(shifted).forEach((a) => { wsTong[a] = shifted[a]; });
-
-      const startRow = sumRows + 3;
-      const detailAOA = XLSX.utils.sheet_to_json(wsDetail, { header: 1 });
-      XLSX.utils.sheet_add_aoa(wsTong, [['Chi tiết toàn bộ']], { origin: `A${startRow}` });
-      XLSX.utils.sheet_add_aoa(wsTong, detailAOA, { origin: `A${startRow + 1}` });
-
-      const lastRow = startRow + detailAOA.length;
-      const lastCol = Math.max(
-        XLSX.utils.decode_range(wsDetail['!ref'] || 'A1:A1').e.c,
-        XLSX.utils.decode_range(wsSum['!ref'] || 'A1:A1').e.c,
-      );
-      wsTong['!ref'] = XLSX.utils.encode_range({ r: 0, c: 0 }, { r: lastRow, c: lastCol });
-      wsTong['!cols'] = autoCols([22, 14, 8, 12, 19, 19, 16, 12]);
-      XLSX.utils.book_append_sheet(wb, wsTong, 'Tong');
-
-      // Sheets theo tháng
-      const sortedKeys = Array.from(monthMap.keys()).sort((a, b) => (a > b ? -1 : 1));
-      for (const key of sortedKeys) {
-        const rows = monthMap.get(key);
-        const label = monthLabelDash(key);
-        const total = Number((monthTotals.get(key) || 0).toFixed(3));
-
-        const base = XLSX.utils.json_to_sheet(rows);
-        const content = [
-          [`Tổng kWh tháng ${label}`, total],
-          [''],
-          ...XLSX.utils.sheet_to_json(base, { header: 1 }),
-        ];
-        const wsFinal = XLSX.utils.aoa_to_sheet(content);
-        wsFinal['!cols'] = autoCols([28, 16, 8, 14, 20, 20, 18, 10]);
-        XLSX.utils.book_append_sheet(wb, wsFinal, label);
-      }
 
       const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
       const blob = new Blob([wbout], { type: 'application/octet-stream' });
       const now = new Date();
-      const fname = `Bao_cao_phien_sac_${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}.xlsx`;
+      const fname = `Bao_cao_nang_luong_${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}.xlsx`;
       saveAs(blob, fname);
     } catch (e) {
       console.warn('Export error:', e);
       alert('Xuất Excel thất bại: ' + (e?.message || e));
     }
-  }, [ensureAllData]);
+  }, [allReady, allSessions, items, summaryLabel, totalKwhFiltered, agentInfo, selectedMonth]);
 
-  /* ================= RENDER ================= */
+  /* ===== highlight search text trong card ===== */
+  const highlightText = (text, query) => {
+    const raw = String(text ?? '');
+    const needle = String(query ?? '').trim();
+    if (!needle) return <Text style={styles.bold}>{raw || '—'}</Text>;
+    const idx = raw.toLowerCase().indexOf(needle.toLowerCase());
+    if (idx < 0) return <Text style={styles.bold}>{raw}</Text>;
+    const before = raw.slice(0, idx);
+    const match = raw.slice(idx, idx + needle.length);
+    const after = raw.slice(idx + needle.length);
+    return (
+      <Text style={styles.bold}>
+        {before}<Text style={styles.hlMatch}>{match}</Text>{after}
+      </Text>
+    );
+  };
+
+  /* ===== Quick chips + nút export ===== */
+  const Chips = (
+    <View style={styles.quickRow}>
+      <TouchableOpacity
+        onPress={() => {
+          setDateFromStr(startOfDayLocal().toISOString());
+          setDateToStr(endOfDayLocal().toISOString());
+          setSelectedMonth('all');
+          setPage(1);
+        }}
+        style={styles.chip} activeOpacity={0.9}
+      >
+        <Text style={styles.chipText}>Hôm nay</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        onPress={() => {
+          const t = new Date();
+          const s = startOfDayLocal(new Date(t.getTime() - 6*24*3600*1000));
+          setDateFromStr(s.toISOString());
+          setDateToStr(endOfDayLocal(t).toISOString());
+          setSelectedMonth('all');
+          setPage(1);
+        }}
+        style={styles.chip} activeOpacity={0.9}
+      >
+        <Text style={styles.chipText}>7 ngày</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        onPress={() => {
+          const t = new Date();
+          const s = startOfDayLocal(new Date(t.getTime() - 29*24*3600*1000));
+          setDateFromStr(s.toISOString());
+          setDateToStr(endOfDayLocal(t).toISOString());
+          setSelectedMonth('all');
+          setPage(1);
+        }}
+        style={styles.chip} activeOpacity={0.9}
+      >
+        <Text style={styles.chipText}>30 ngày</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity onPress={exportExcel} style={[styles.exportBtn, { marginLeft: 8 }]} activeOpacity={0.9}>
+        <Icon name="download" size={16} color="#fff" />
+        <Text style={styles.exportText}>Xuất Excel</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  /* ===== Thanh summary kWh trên UI ===== */
+  const SummaryBar = () => (
+    <View style={styles.summaryWrap}>
+      <Icon name="bolt" size={18} color="#2563EB" style={{ marginRight: 6 }} />
+      <Text style={styles.summaryText}>
+        {summaryLabel}: <Text style={styles.summaryNumber}>{totalKwhFiltered} kWh</Text>
+      </Text>
+    </View>
+  );
+
+  /* ===== Skeleton card ===== */
+  const SkeletonCard = () => (
+    <View style={styles.card}>
+      <View style={[styles.skel, { width: '48%', height: 16, marginBottom: 8 }]} />
+      <View style={{ flexDirection:'row', alignItems:'center', gap:8, marginBottom:8 }}>
+        <View style={[styles.skel, { width: 110, height: 12 }]} />
+        <View style={[styles.skel, { width: 60, height: 12 }]} />
+      </View>
+      <View style={[styles.skel, { width: '80%', height: 12, marginTop: 6 }]} />
+      <View style={[styles.skel, { width: '70%', height: 12, marginTop: 6 }]} />
+      <View style={[styles.skel, { width: '60%', height: 12, marginTop: 6 }]} />
+    </View>
+  );
+
+  /* ===== Render 1 item session ===== */
   const renderItem = ({ item }) => {
     const dev = item?.device_id || {};
     const st = String(item?.status || '').toLowerCase();
@@ -486,11 +748,9 @@ const fetchAllOnce = useCallback(async () => {
           <View style={{ flex: 1 }}>
             <Text style={styles.cardTitle}>{dev?.name || 'Thiết bị'}</Text>
             <Text style={styles.sub}>
-              Mã đơn: <Text style={styles.bold}>{item?.order_id || '—'}</Text> · Cổng{' '}
-              <Text style={styles.bold}>{item?.portNumber ?? '—'}</Text>
+              Mã đơn: {highlightText(item?.order_id || '—', search)} · Cổng <Text style={styles.bold}>{item?.portNumber ?? '—'}</Text>
             </Text>
           </View>
-
           <View style={[styles.statusPill, { backgroundColor: `${color}1A`, borderColor: color }]}>
             <Text style={[styles.statusText, { color }]}>{viStatus(st)}</Text>
           </View>
@@ -500,77 +760,79 @@ const fetchAllOnce = useCallback(async () => {
           <Text style={styles.k}>Bắt đầu</Text>
           <Text style={styles.v}>{fmt(item?.startTime)}</Text>
         </View>
+
         <View style={styles.row}>
           <Text style={styles.k}>Kết thúc</Text>
           <Text style={styles.v}>{fmt(item?.endTime)}</Text>
         </View>
+
         <View style={styles.row}>
           <Text style={styles.k}>Năng lượng</Text>
-          <Text style={styles.v}>{(item?.energy_used_kwh ?? 0) + ' kWh'}</Text>
+          <Text style={styles.v}>
+            {(item?.energy_used_kwh ?? item?.energy_kwh ?? item?.energy ?? 0) + ' kWh'}
+          </Text>
         </View>
       </View>
     );
   };
 
-  const MonthTotalCard = () => {
-    if (selectedMonth === 'all') return null;
-    return (
-      <View style={styles.totalCard}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent:'space-between' }}>
-          <Text style={styles.totalTitle}>Tổng tháng {monthLabelSlash(selectedMonth)}</Text>
-          <Text style={styles.totalValue}>{Number(monthTotalKWh || 0).toFixed(2)} kWh</Text>
-        </View>
-        <Text style={styles.totalHint}>(Tính từ toàn bộ dữ liệu đã tải, không phụ thuộc trang)</Text>
-      </View>
-    );
-  };
-
+  /* ===== RENDER ROOT ===== */
   return (
     <SafeAreaView style={styles.container} {...panResponder.panHandlers}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={goBack} style={styles.backButton}>
+        <TouchableOpacity onPress={goBack} style={{ padding: 6, marginRight: 6 }}>
           <Text style={{ fontSize: 30, color: '#fff' }}>{'‹'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Phiên sạc</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      {/* Hàng 1: Search */}
-      <View style={styles.searchWrap}>
+      {/* Search */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 }}>
         <SearchBar
           placeholder="Nhập mã đơn để tìm kiếm"
           value={search}
-          onChange={(txt) => { setSearch(txt); }}
-          onClear={() => { setSearch(''); doSearch(); }}
-          onSubmit={doSearch}
+          onChange={setSearch}
+          onClear={() => setSearch('')}
+          onSubmit={() => {}}
         />
       </View>
 
-      {/* Hàng 2: Dropdown + Export */}
-      <View style={styles.actionRow}>
-        <MonthDropdown
-          options={monthOptions}
-          value={selectedMonth}
-          onChange={(k) => { setSelectedMonth(k); setPage(1); }}
-        />
-        <TouchableOpacity onPress={exportExcel} style={styles.exportBtn} activeOpacity={0.9}>
-          <Icon name="download" size={16} color="#fff" />
-          <Text style={styles.exportText}>Xuất Excel</Text>
-        </TouchableOpacity>
+      {/* Filters + Chips/Export */}
+      <WebFilters
+        monthOptions={monthOptions}
+        monthValue={selectedMonth}
+        onMonthChange={(k) => { setSelectedMonth(k); setPage(1); }}
+
+        portOptions={portOptions}
+        portValue={selectedPort}
+        onPortChange={(k) => { setSelectedPort(k); setPage(1); }}
+
+        fromStr={dateFromStr}
+        toStr={dateToStr}
+        onFromChange={(v) => { setDateFromStr(v); setSelectedMonth('all'); setPage(1); }}
+        onToChange={(v) => { setDateToStr(v); setSelectedMonth('all'); setPage(1); }}
+        onClearDates={() => { setDateFromStr(''); setDateToStr(''); setSelectedMonth('all'); }}
+
+        rightSlot={Chips}
+      />
+
+      {/* Summary kWh */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 0 }}>
+        <SummaryBar />
       </View>
 
-      {/* Tổng tháng */}
-      <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
-        <MonthTotalCard />
-      </View>
-
-      {/* Nội dung */}
+      {/* List */}
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#4A90E2" />
-          <Text style={{ marginTop: 8, color: '#64748b' }}>Đang tải dữ liệu…</Text>
-        </View>
+        <FlatList
+          data={[...Array(6).keys()]}
+          keyExtractor={(i) => `skel-${i}`}
+          renderItem={() => <SkeletonCard />}
+          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+          contentContainerStyle={{ padding: 16, paddingBottom: BOTTOM_PAD }}
+          showsVerticalScrollIndicator={false}
+        />
       ) : (
         <FlatList
           data={items}
@@ -578,12 +840,7 @@ const fetchAllOnce = useCallback(async () => {
           renderItem={renderItem}
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
           contentContainerStyle={{ padding: 16, paddingBottom: BOTTOM_PAD, overflow: 'visible' }}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          ListEmptyComponent={
-            <View style={styles.emptyWrap}>
-              <Text style={styles.emptyText}>Không có phiên phù hợp</Text>
-            </View>
-          }
+          refreshControl={<RefreshControl refreshing={refreshingState} onRefresh={onRefresh} />}
           ListFooterComponent={
             <View style={{ marginTop: 12, backgroundColor: '#fff', borderRadius: 12, overflow: 'hidden' }}>
               <PaginationControls
@@ -591,7 +848,7 @@ const fetchAllOnce = useCallback(async () => {
                 totalPages={totalPages}
                 onPrev={handlePrev}
                 onNext={handleNext}
-                  onGoTo={handleGoTo}
+                onGoTo={handleGoTo}
               />
             </View>
           }
@@ -602,130 +859,42 @@ const fetchAllOnce = useCallback(async () => {
   );
 }
 
-/* ================= styles ================= */
+/* =============== styles =============== */
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F6F7FB' },
 
   header: {
     backgroundColor: '#4A90E2',
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: Platform.OS === 'ios' ? 16 : 16,
     paddingBottom: 12,
     flexDirection: 'row',
     alignItems: 'center',
   },
-  backButton: { padding: 6, marginRight: 6 },
   headerTitle: { flex: 1, color: '#fff', fontSize: 18, fontWeight: '700' },
 
-  // hàng search (riêng)
-  searchWrap: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 4,
-    zIndex: 20,
-  },
-
-  // hàng dropdown + export
-  actionRow: {
-    paddingHorizontal: 16,
-    paddingTop: 6,
-    paddingBottom: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    zIndex: 19,
-  },
-
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-
-  // dropdown (clean)
-  ddWrapWeb: { position: 'relative', zIndex: 99, minWidth: 220, flex: 1, maxWidth: 360 },
-  ddButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  summaryWrap: {
+    backgroundColor: '#EEF2FF',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2563EB',
-    paddingVertical: 8,
+    borderColor: '#2563EB55',
     paddingHorizontal: 12,
-    backgroundColor: '#fff',
-    justifyContent: 'space-between',
-  },
-  ddButtonText: { color: '#2563EB', fontWeight: '800', flex: 1, marginRight: 6, textAlign: 'left' },
-
-  popoverBackdrop: {
-    position: 'fixed',
-    top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'transparent',
-  },
-  popoverPanel: {
-    position: 'absolute',
-    top: 50,
-    left: 0,
-    right: 'auto',
-    width: 280,
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    boxShadow: '0 12px 30px rgba(0,0,0,0.12)',
-    elevation: 8,
-  },
-
-  ddHeader: {
-    paddingHorizontal: 14,
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#F8FAFF',
   },
-  ddTitle: { fontSize: 13, fontWeight: '800', color: '#111827' },
-  ddClose: {
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: '#F3F4F6',
-    alignItems: 'center', justifyContent: 'center',
+  summaryText: {
+    fontSize: 13,
+    color: '#1e293b',
+    fontWeight: '600',
+    flexShrink: 1,
+    flexWrap: 'wrap'
   },
-  ddItem: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#F1F5F9',
-    backgroundColor: '#fff',
+  summaryNumber: {
+    color: '#111827',
+    fontWeight: '800'
   },
-  ddItemActive: { backgroundColor: '#2563EB' },
-  ddItemText: { color: '#111827', fontWeight: '700', textAlign: 'left' },
-  ddItemTextActive: { color: '#fff', fontWeight: '800' },
 
-  // export
-  exportBtn: {
-    backgroundColor: '#10B981',
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    height: 40,
-  },
-  exportText: { color: '#fff', fontWeight: '800' },
-
-  // total card
-  totalCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  totalTitle: { fontSize: 13, fontWeight: '800', color: '#111827' },
-  totalValue: { fontSize: 18, fontWeight: '900', color: '#111827' },
-  totalHint: { marginTop: 4, fontSize: 11, color: '#6B7280' },
-
-  // list cards
   card: {
     backgroundColor: '#fff',
     borderRadius: 14,
@@ -741,12 +910,9 @@ const styles = StyleSheet.create({
   sub: { marginTop: 2, fontSize: 12, color: '#6b7280' },
   bold: { fontWeight: '800', color: '#111827' },
 
-  statusPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
+  hlMatch: { backgroundColor: '#FEF3C7', color: '#111827', borderRadius: 4, paddingHorizontal: 2 },
+
+  statusPill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, borderWidth: 1 },
   statusText: { fontSize: 12, fontWeight: '700' },
 
   row: {
@@ -759,6 +925,27 @@ const styles = StyleSheet.create({
   k: { flex: 1, fontSize: 13, color: '#6b7280' },
   v: { fontSize: 13, fontWeight: '700', color: '#111827' },
 
-  emptyWrap: { padding: 24, alignItems: 'center' },
-  emptyText: { marginTop: 8, color: '#94a3b8', fontWeight: '600' },
+  exportBtn: {
+    backgroundColor: '#10B981',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    height: 40,
+    alignSelf: 'flex-start'
+  },
+  exportText: { color: '#fff', fontWeight: '800' },
+
+  // chips
+  quickRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  chip: {
+    backgroundColor: '#e5e7eb', borderRadius: 10,
+    paddingHorizontal: 10, paddingVertical: 8, alignItems: 'center', justifyContent: 'center', height: 40
+  },
+  chipText: { fontSize: 12, fontWeight: '700', color: '#111827' },
+
+  // skeleton
+  skel: { backgroundColor: '#E5E7EB', borderRadius: 8 }
 });

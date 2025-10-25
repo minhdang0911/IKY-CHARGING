@@ -20,6 +20,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import ViewShot from 'react-native-view-shot';
 import Share from 'react-native-share';
 import RNFS from 'react-native-fs';
+import { buildRevenueWorkbookPro } from '../../utils/buildRevenueWorkbookPro';
+import { saveAs } from 'file-saver';
+import * as XLSX from 'xlsx';
+
 
 import useLanguage from '../../Hooks/useLanguage';
 import useDashboardData from '../../Hooks/useDashboardData';
@@ -168,6 +172,38 @@ export default function JourneyScreen({ navigateToScreen }) {
   const exportCSVMobile=async(csv,filename)=>{const dir=Platform.select({ios:RNFS.TemporaryDirectoryPath,android:RNFS.CachesDirectoryPath});const filePath=`${dir}/${filename}`;await RNFS.writeFile(filePath,csv,'utf8');const url=Platform.OS==='android'?(filePath.startsWith('file://')?filePath:`file://${filePath}`):filePath;await Share.open({url,type:'text/csv',failOnCancel:false,title:'Xuất CSV'})}
   const exportCSV=async()=>{try{if(!revenueData?.length){notify('Không có dữ liệu để xuất');return}const csv=buildRevenueCSV(revenueData);const filename=getRangeFileNameVi(revenueData);if(isWeb){exportCSVWeb(csv,filename);notify('Đã tải CSV thành công')}else{await exportCSVMobile(csv,filename)}}catch(e){console.warn('[ExportCSV] error:',e?.message||e);notify('Xuất CSV thất bại')}}
 
+
+  const exportExcel = async () => {
+  try {
+    if (!revenueData?.length) {
+      notify('Không có dữ liệu để xuất');
+      return;
+    }
+
+    const wb = buildRevenueWorkbookPro({
+      revenueData,
+      maxMin,
+      compareA: a,
+      compareB: b,
+      m1,
+      m2,
+      agentInfo: overview?.agent || {}, // hoặc truyền từ useAgentInfo nếu m có
+      companyName: 'IKY Smart Utility',
+    });
+
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/octet-stream' });
+
+    const now = new Date();
+    const fname = `Bao_cao_doanh_thu_${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}.xlsx`;
+    saveAs(blob, fname);
+    notify('Đã xuất Excel thành công!');
+  } catch (e) {
+    console.warn('[ExportExcel] error:', e);
+    notify('Xuất Excel thất bại!');
+  }
+};
+
   // ===== Share image =====
   const shareChartAsImageWeb = async () => {
     try {
@@ -218,7 +254,7 @@ export default function JourneyScreen({ navigateToScreen }) {
           title={L.monthlyRevenue}
           right={
             <View style={s.smallTabRow}>
-              <TouchableOpacity style={s.smallTabBtn} onPress={exportCSV} activeOpacity={0.85}>
+              <TouchableOpacity style={s.smallTabBtn} onPress={exportExcel} activeOpacity={0.85}>
                 <Text style={s.smallTabText}>Tải CSV</Text>
               </TouchableOpacity>
               <TouchableOpacity
