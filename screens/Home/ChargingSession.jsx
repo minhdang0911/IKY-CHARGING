@@ -1,14 +1,18 @@
-// screens/Home/ChargingSession.jsx (PNG icons, no vector-icons)
+// screens/Home/ChargingSession.jsx (PNG icons, no vector-icons, + lọc theo khoảng thời gian)
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   SafeAreaView, View, Text, StyleSheet, TouchableOpacity, FlatList,
   RefreshControl, ActivityIndicator, BackHandler, PanResponder,
-  Pressable, ScrollView, Platform, Alert, PermissionsAndroid, ToastAndroid, Image,
+  Pressable, ScrollView, Platform, Alert, PermissionsAndroid,
+  ToastAndroid, Image,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getSessions } from '../../apis/devices';
 import SearchBar from '../../components/SearchBar';
 import PaginationControls from '../../components/PaginationControls';
+
+// 🆕 modal chọn khoảng thời gian
+import DateTimeRangePickerModal from '../../components/DateTimeRangePickerModal';
 
 // Excel export
 import * as XLSX from 'xlsx';
@@ -31,8 +35,8 @@ import icDownload from '../../assets/img/ic_download.png';
 
 /* ================= helpers ================= */
 const TAB_BAR_HEIGHT = 72;
-const PAGINATION_DOCK_HEIGHT = 96; // ~2 hàng (Prev/Next + Go to)
-const BOTTOM_PAD = TAB_BAR_HEIGHT + PAGINATION_DOCK_HEIGHT + 16; // chừa chỗ cho dock cố định
+const PAGINATION_DOCK_HEIGHT = 96;
+const BOTTOM_PAD = TAB_BAR_HEIGHT + PAGINATION_DOCK_HEIGHT + 16;
 
 async function getAccessTokenSafe() {
   const keys = ['access_token', 'accessToken', 'ACCESS_TOKEN', 'token', 'auth_token'];
@@ -91,6 +95,24 @@ function monthLabelSlash(key) {
   return `${m}/${y}`;
 }
 
+// 🆕 util check time trong range
+function inRangeByTime(it, fromTs, toTs) {
+  // dùng startTime làm mốc chính, fallback endTime
+  const t = new Date(it?.startTime || it?.endTime || 0).getTime();
+  if (!t || Number.isNaN(t)) return false;
+  if (fromTs != null && t < fromTs) return false;
+  if (toTs   != null && t > toTs)   return false;
+  return true;
+}
+
+// 🆕 format label cho nút lọc thời gian
+function buildRangeLabel(fromTs, toTs) {
+  if (fromTs == null && toTs == null) return 'Khoảng thời gian: Tất cả';
+  const f = fromTs != null ? fmt(fromTs) : '—';
+  const t = toTs   != null ? fmt(toTs)   : '—';
+  return `${f} → ${t}`;
+}
+
 /* ===================== MonthDropdown ===================== */
 function MonthDropdown({ options, value, onChange }) {
   const [open, setOpen] = useState(false);
@@ -140,6 +162,7 @@ function MonthDropdown({ options, value, onChange }) {
 
 /* ===================== Screen ===================== */
 export default function ChargingSession({ navigateToScreen }) {
+  /* ===== nav back + swipe back ===== */
   const goBack = useCallback(() => {
     if (navigateToScreen) navigateToScreen('Device');
     return true;
@@ -163,6 +186,7 @@ export default function ChargingSession({ navigateToScreen }) {
     [goBack]
   );
 
+  /* ===== STATES ===== */
   const [page, setPage] = useState(1);
   const [limit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
@@ -170,11 +194,26 @@ export default function ChargingSession({ navigateToScreen }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState('');
+
   const [selectedMonth, setSelectedMonth] = useState('all');
   const [allSessions, setAllSessions] = useState([]);
   const [allReady, setAllReady] = useState(false);
   const [monthOptions, setMonthOptions] = useState([]);
 
+  // 🆕 lọc range thời gian (ms)
+  const [fromTs, setFromTs] = useState(null); // applied range
+  const [toTs, setToTs]     = useState(null);
+
+  // 🆕 modal visible + temp state để user pick trước khi Apply
+  const [showRangeModal, setShowRangeModal] = useState(false);
+  const [tmpFromTs, setTmpFromTs] = useState(null);
+  const [tmpToTs,   setTmpToTs]   = useState(null);
+
+  // 🆕 iOS picker inline state
+  const [iosPickerTarget, setIosPickerTarget] = useState(null); // 'from' | 'to' | null
+  const [iosPickerValue, setIosPickerValue]   = useState(new Date());
+
+  /* ===== FETCH ALL ===== */
   const fetchAllOnce = useCallback(async () => {
     try {
       const token = await getAccessTokenSafe();
@@ -190,13 +229,16 @@ export default function ChargingSession({ navigateToScreen }) {
         const lim = Number(res?.limit ?? res?.per_page ?? HARD_LIMIT) || HARD_LIMIT;
         const totalItems = Number(res?.total ?? 0);
         tp = res?.totalPages ?? res?.total_pages
-          ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
+          ?? (totalItems
+                ? Math.ceil(totalItems / lim)
+                : (list.length < lim ? p : p + 1));
 
         p += 1;
       } while (p <= tp);
 
       setAllSessions(all);
 
+      // build month list
       const keys = new Set();
       for (const it of all) {
         const mk = monthKey(it?.startTime || it?.endTime);
@@ -204,6 +246,7 @@ export default function ChargingSession({ navigateToScreen }) {
       }
       const arr = Array.from(keys).sort((a, b) => (a > b ? -1 : 1));
       setMonthOptions(arr);
+
       setAllReady(true);
     } catch (e) {
       console.warn('Lỗi load ALL sessions:', e?.message || e);
@@ -213,21 +256,38 @@ export default function ChargingSession({ navigateToScreen }) {
     }
   }, []);
 
+  /* ===== FETCH 1 PAGE FROM BACKEND (BE paginate) ===== */
   const fetchBackendPage = useCallback(async (p = 1, q = '') => {
     setLoading(true);
     try {
       const token = await getAccessTokenSafe();
       const params = { page: p, limit };
       if (q.trim()) params.search = q.trim();
+      // 🆕 nếu có range time và selectedMonth === 'all'
+      // thì ta cố gắng truyền from/to cho BE nếu BE support.
+      // Nếu BE của m CHƯA có from/to thì bỏ 2 dòng dưới.
+      if (fromTs != null) params.startFrom = new Date(fromTs).toISOString();
+      if (toTs   != null) params.startTo   = new Date(toTs).toISOString();
+
       const res = await getSessions(token, params);
 
-      const list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+      let list = Array.isArray(res?.data) ? res.data : (Array.isArray(res) ? res : []);
+
+      // 🆕 fallback: nếu BE KHÔNG support from/to => filter tạm FE sau khi lấy trang
+      if (selectedMonth === 'all') {
+        if (fromTs != null || toTs != null) {
+          list = list.filter((it) => inRangeByTime(it, fromTs, toTs));
+        }
+      }
+
       setItems(list);
 
       const lim = Number(res?.limit ?? res?.per_page ?? limit) || limit;
       const totalItems = Number(res?.total ?? 0);
       const tp = res?.totalPages ?? res?.total_pages
-        ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
+        ?? (totalItems
+              ? Math.ceil(totalItems / lim)
+              : (list.length < lim ? p : p + 1));
       setTotalPages(Math.max(1, Number(tp)));
       setPage(res?.page || p);
     } catch (e) {
@@ -238,26 +298,62 @@ export default function ChargingSession({ navigateToScreen }) {
     } finally {
       setLoading(false);
     }
-  }, [limit]);
+  }, [limit, selectedMonth, fromTs, toTs]);
 
-  const applyFEFilterPaginate = useCallback((targetMonth, q, p = 1) => {
-    let base = allSessions;
-    if (targetMonth !== 'all') {
-      base = base.filter(it => monthKey(it?.startTime || it?.endTime) === targetMonth);
-    }
-    if (q.trim()) {
-      const needle = q.trim().toLowerCase();
-      base = base.filter(it => String(it?.order_id || '').toLowerCase().includes(needle));
-    }
-    const tp = Math.max(1, Math.ceil(base.length / limit));
-    const safePage = Math.min(Math.max(1, p), tp);
-    const start = (safePage - 1) * limit;
-    setItems(base.slice(start, start + limit));
-    setTotalPages(tp);
-    setPage(safePage);
-    setLoading(false);
-  }, [allSessions, limit]);
+  /* ===== FE paginate (dùng full data đã cache) ===== */
+  const applyFEFilterPaginate = useCallback(
+    (targetMonth, q, p = 1, rangeFromTs = fromTs, rangeToTs = toTs) => {
+      let base = allSessions;
 
+      // lọc theo tháng
+      if (targetMonth !== 'all') {
+        base = base.filter(
+          it => monthKey(it?.startTime || it?.endTime) === targetMonth
+        );
+      }
+
+      // lọc theo khoảng thời gian
+      if (rangeFromTs != null || rangeToTs != null) {
+        base = base.filter((it) => inRangeByTime(it, rangeFromTs, rangeToTs));
+      }
+
+      // lọc search mã đơn
+      if (q.trim()) {
+        const needle = q.trim().toLowerCase();
+        base = base.filter(it =>
+          String(it?.order_id || '').toLowerCase().includes(needle)
+        );
+      }
+
+      // phân trang FE
+      const tp = Math.max(1, Math.ceil(base.length / limit));
+      const safePage = Math.min(Math.max(1, p), tp);
+      const start = (safePage - 1) * limit;
+      setItems(base.slice(start, start + limit));
+      setTotalPages(tp);
+      setPage(safePage);
+      setLoading(false);
+    },
+    [allSessions, limit, fromTs, toTs]
+  );
+
+  /* ===== EFFECTS ===== */
+
+  // init allSessions
+  useEffect(() => { fetchAllOnce(); }, [fetchAllOnce]);
+
+  // khi đổi tháng => reload view
+  useEffect(() => {
+    if (selectedMonth === 'all') {
+      // BE paginate
+      fetchBackendPage(1, search);
+    } else {
+      setLoading(true);
+      applyFEFilterPaginate(selectedMonth, search, 1);
+    }
+  }, [selectedMonth, fetchBackendPage, applyFEFilterPaginate, search]);
+
+  // khi đổi khoảng thời gian applied => refetch/phân trang lại
   useEffect(() => {
     if (selectedMonth === 'all') {
       fetchBackendPage(1, search);
@@ -265,10 +361,9 @@ export default function ChargingSession({ navigateToScreen }) {
       setLoading(true);
       applyFEFilterPaginate(selectedMonth, search, 1);
     }
-  }, [selectedMonth]);
+  }, [fromTs, toTs, selectedMonth, search, fetchBackendPage, applyFEFilterPaginate]);
 
-  useEffect(() => { fetchAllOnce(); }, []);
-
+  /* ===== ACTIONS ===== */
   const doSearch = useCallback(() => {
     setLoading(true);
     if (selectedMonth === 'all') {
@@ -312,6 +407,7 @@ export default function ChargingSession({ navigateToScreen }) {
     }
   }, [page, totalPages, selectedMonth, search, fetchBackendPage, applyFEFilterPaginate]);
 
+  /* ===== SUM KWH THEO THÁNG (KO DÍNH RANGE) ===== */
   const monthTotalKWh = useMemo(() => {
     if (selectedMonth === 'all') return 0;
     let total = 0;
@@ -324,6 +420,7 @@ export default function ChargingSession({ navigateToScreen }) {
     return total;
   }, [selectedMonth, allSessions]);
 
+  /* ===== EXPORT EXCEL (same logic, không filter theo range để giữ dữ liệu full) ===== */
   const ensureAllData = useCallback(async () => {
     if (allReady) return allSessions;
     try {
@@ -341,7 +438,10 @@ export default function ChargingSession({ navigateToScreen }) {
         out.push(...list);
         const lim = Number(res?.limit ?? 100) || 100;
         const totalItems = Number(res?.total ?? 0);
-        tp = res?.totalPages ?? (totalItems ? Math.ceil(totalItems / lim) : (list.length < lim ? p : p + 1));
+        tp = res?.totalPages ?? (
+          totalItems ? Math.ceil(totalItems / lim)
+                     : (list.length < lim ? p : p + 1)
+        );
         p++;
       } while (p <= tp);
       return out;
@@ -361,12 +461,10 @@ export default function ChargingSession({ navigateToScreen }) {
 
   const autoCols = (headers) => headers.map(w => ({ wch: w }));
 
-  // ========== EXPORT EXCEL (Web, Android with notification, iOS) ==========
   const exportExcel = useCallback(async () => {
     try {
       const data = await ensureAllData();
 
-      // Nhóm theo tháng
       const monthMap = new Map();
       const monthTotals = new Map();
       for (const it of data) {
@@ -376,12 +474,14 @@ export default function ChargingSession({ navigateToScreen }) {
         if (!monthMap.has(key)) monthMap.set(key, []);
         monthMap.get(key).push(row);
         const kwh = Number(row['Năng lượng (kWh)'] || 0);
-        monthTotals.set(key, (monthTotals.get(key) || 0) + (Number.isFinite(kwh) ? kwh : 0));
+        monthTotals.set(
+          key,
+          (monthTotals.get(key) || 0) + (Number.isFinite(kwh) ? kwh : 0)
+        );
       }
 
       const wb = XLSX.utils.book_new();
 
-      // Sheet "Tong"
       const sums = Array.from(monthTotals.entries())
         .sort((a, b) => (a[0] > b[0] ? -1 : 1))
         .map(([k, v]) => ({ 'Tháng': monthLabelDash(k), 'Tổng kWh': Number(v.toFixed(3)) }));
@@ -406,8 +506,8 @@ export default function ChargingSession({ navigateToScreen }) {
       });
       Object.keys(shifted).forEach((a) => { wsTong[a] = shifted[a]; });
 
-      const startRow = sumRows + 3;
       const detailAOA = XLSX.utils.sheet_to_json(wsDetail, { header: 1 });
+      const startRow = sumRows + 3;
       XLSX.utils.sheet_add_aoa(wsTong, [['Chi tiết toàn bộ']], { origin: `A${startRow}` });
       XLSX.utils.sheet_add_aoa(wsTong, detailAOA, { origin: `A${startRow + 1}` });
 
@@ -416,11 +516,13 @@ export default function ChargingSession({ navigateToScreen }) {
         XLSX.utils.decode_range(wsDetail['!ref'] || 'A1:A1').e.c,
         XLSX.utils.decode_range(wsSum['!ref'] || 'A1:A1').e.c,
       );
-      wsTong['!ref'] = XLSX.utils.encode_range({ r: 0, c: 0 }, { r: lastRow, c: lastCol });
+      wsTong['!ref'] = XLSX.utils.encode_range(
+        { r: 0, c: 0 },
+        { r: lastRow, c: lastCol }
+      );
       wsTong['!cols'] = autoCols([22, 14, 8, 12, 19, 19, 16, 12]);
       XLSX.utils.book_append_sheet(wb, wsTong, 'Tong');
 
-      // Sheets theo tháng
       const sortedKeys = Array.from(monthMap.keys()).sort((a, b) => (a > b ? -1 : 1));
       for (const key of sortedKeys) {
         const rows = monthMap.get(key);
@@ -442,21 +544,17 @@ export default function ChargingSession({ navigateToScreen }) {
       const fname = `Bao_cao_phien_sac_${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}.xlsx`;
 
       if (Platform.OS === 'web') {
-        // WEB: download trực tiếp
         const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
         const blob = new Blob([wbout], { type: 'application/octet-stream' });
         saveAs(blob, fname);
         Alert.alert('Thành công', 'File Excel đã được tải xuống');
       } else {
-        // MOBILE
         const wboutBase64 = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
 
         if (Platform.OS === 'android') {
-          // Ghi tạm vào cache
           const cachePath = `${RNFS.CachesDirectoryPath}/${fname}`;
           await RNFS.writeFile(cachePath, wboutBase64, 'base64');
 
-          // Thử đăng ký DownloadManager để có notification
           const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
           try {
             await RNBlobUtil.android.addCompleteDownload({
@@ -469,7 +567,6 @@ export default function ChargingSession({ navigateToScreen }) {
             });
             ToastAndroid.show('Đã tải xuống (xem trong Tải xuống)', ToastAndroid.SHORT);
           } catch (err) {
-            // Fallback: copy sang /Download + scan
             const api = typeof Platform.Version === 'number'
               ? Platform.Version : parseInt(Platform.Version, 10);
             if (api <= 28) {
@@ -487,7 +584,6 @@ export default function ChargingSession({ navigateToScreen }) {
             Alert.alert('Thành công', `Đã lưu: ${outPath}`);
           }
         } else {
-          // iOS: Save to Files
           const iosPath = `${RNFS.DocumentDirectoryPath}/${fname}`;
           await RNFS.writeFile(iosPath, wboutBase64, 'base64');
           try {
@@ -510,7 +606,7 @@ export default function ChargingSession({ navigateToScreen }) {
     }
   }, [ensureAllData]);
 
-  /* ================= RENDER ================= */
+  /* ===== RENDER UI ===== */
   const renderItem = ({ item }) => {
     const dev = item?.device_id || {};
     const st = String(item?.status || '').toLowerCase();
@@ -561,6 +657,34 @@ export default function ChargingSession({ navigateToScreen }) {
     );
   };
 
+  // 🆕 handler mở modal range
+  const openRangePicker = () => {
+    setTmpFromTs(fromTs);
+    setTmpToTs(toTs);
+    setIosPickerTarget(null);
+    setIosPickerValue(new Date());
+    setShowRangeModal(true);
+  };
+
+  // 🆕 clear range (cả tmp lẫn applied)
+  const clearRange = () => {
+    setTmpFromTs(null);
+    setTmpToTs(null);
+    // clear áp dụng luôn
+    setFromTs(null);
+    setToTs(null);
+    setShowRangeModal(false);
+  };
+
+  // 🆕 apply tmp -> applied
+  const applyTmpRange = () => {
+    setFromTs(tmpFromTs ?? null);
+    setToTs(tmpToTs ?? null);
+    setShowRangeModal(false);
+  };
+
+  const rangeLabel = buildRangeLabel(fromTs, toTs);
+
   return (
     <SafeAreaView style={styles.container} {...panResponder.panHandlers}>
       <View style={styles.header}>
@@ -581,80 +705,119 @@ export default function ChargingSession({ navigateToScreen }) {
         />
       </View>
 
-      <View style={styles.actionRow}>
-        <MonthDropdown
-          options={monthOptions}
-          value={selectedMonth}
-          onChange={(k) => { setSelectedMonth(k); setPage(1); }}
-        />
-        <TouchableOpacity onPress={exportExcel} style={styles.exportBtn} activeOpacity={0.9}>
-          <Image source={icDownload} style={{ width: 16, height: 16, tintColor: '#fff', marginRight: 8 }} />
-          <Text style={styles.exportText}>Xuất Excel</Text>
-        </TouchableOpacity>
-      </View>
+      {/* action row: chọn tháng + chọn khoảng thời gian + export */}
+      {/* HÀNG TRÊN: tháng + export */}
+<View style={styles.topRow}>
+  <MonthDropdown
+    options={monthOptions}
+    value={selectedMonth}
+    onChange={(k) => { setSelectedMonth(k); setPage(1); }}
+  />
+
+  <TouchableOpacity onPress={exportExcel} style={styles.exportBtn} activeOpacity={0.9}>
+    <Image source={icDownload} style={{ width: 16, height: 16, tintColor: '#fff', marginRight: 8 }} />
+    <Text style={styles.exportText}>Xuất Excel</Text>
+  </TouchableOpacity>
+</View>
+
+{/* HÀNG DƯỚI: khoảng thời gian full width */}
+<View style={styles.bottomRow}>
+  <TouchableOpacity
+    style={styles.timeRangeBtnFull}
+    activeOpacity={0.9}
+    onPress={openRangePicker}
+  >
+    <Text style={styles.timeRangeBtnLabel} numberOfLines={2}>
+      {rangeLabel}
+    </Text>
+  </TouchableOpacity>
+</View>
+
+<View style={{ paddingHorizontal: 16, marginTop: 8 }}>
+  <MonthTotalCard />
+</View>
+
 
       <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
         <MonthTotalCard />
       </View>
 
-    {loading ? (
-  <View style={styles.center}>
-    <ActivityIndicator size="large" color="#4A90E2" />
-    <Text style={{ marginTop: 8, color: '#64748b' }}>Đang tải dữ liệu…</Text>
-  </View>
-) : (
-  <>
-    <FlatList
-      data={items}
-      keyExtractor={(it, idx) => String(it?._id || it?.order_id || idx)}
-      renderItem={renderItem}
-      ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-      contentContainerStyle={{
-        padding: 16,
-        paddingBottom: 8, // vừa đủ, không cần chừa dock nữa
-      }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-      ListEmptyComponent={
-        <View style={styles.emptyWrap}>
-          <Text style={styles.emptyText}>Không có phiên phù hợp</Text>
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#4A90E2" />
+          <Text style={{ marginTop: 8, color: '#64748b' }}>Đang tải dữ liệu…</Text>
         </View>
-      }
-    />
+      ) : (
+        <>
+          <FlatList
+            data={items}
+            keyExtractor={(it, idx) => String(it?._id || it?.order_id || idx)}
+            renderItem={renderItem}
+            ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+            contentContainerStyle={{
+              padding: 16,
+              paddingBottom: 8,
+            }}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            ListEmptyComponent={
+              <View style={styles.emptyWrap}>
+                <Text style={styles.emptyText}>Không có phiên phù hợp</Text>
+              </View>
+            }
+          />
 
-    {/* KHỐI PHÂN TRANG CỐ ĐỊNH (giống HistoryExtend) */}
-    <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
-      <View
-        style={{
-          backgroundColor: '#fff',
-          borderRadius: 12,
-          overflow: 'hidden',
-          borderWidth: 1,
-          borderColor: '#E5E7EB',
-          elevation: 3,
-          shadowColor: '#000',
-          shadowOpacity: 0.05,
-          shadowRadius: 6,
-          shadowOffset: { width: 0, height: 4 },
-        }}
-      >
-        <PaginationControls
-          page={page}
-          totalPages={totalPages}
-          onPrev={handlePrev}
-          onNext={handleNext}
-          showGoto
-          onJump={(n) => {
-            setPage(n);
-            if (selectedMonth === 'all') fetchBackendPage(n, search);
-            else applyFEFilterPaginate(selectedMonth, search, n);
-          }}
-        />
-      </View>
-    </View>
-  </>
-)}
+          {/* KHỐI PHÂN TRANG CỐ ĐỊNH */}
+          <View style={{ paddingHorizontal: 16, paddingBottom: 4 }}>
+            <View
+              style={{
+                backgroundColor: '#fff',
+                borderRadius: 12,
+                overflow: 'hidden',
+                borderWidth: 1,
+                borderColor: '#E5E7EB',
+                elevation: 3,
+                shadowColor: '#000',
+                shadowOpacity: 0.05,
+                shadowRadius: 6,
+                shadowOffset: { width: 0, height: 4 },
+              }}
+            >
+              <PaginationControls
+                page={page}
+                totalPages={totalPages}
+                onPrev={handlePrev}
+                onNext={handleNext}
+                showGoto
+                onJump={(n) => {
+                  setPage(n);
+                  if (selectedMonth === 'all') fetchBackendPage(n, search);
+                  else applyFEFilterPaginate(selectedMonth, search, n);
+                }}
+              />
+            </View>
+          </View>
+        </>
+      )}
 
+      {/* 🆕 MODAL PICK KHOẢNG THỜI GIAN */}
+      <DateTimeRangePickerModal
+        visible={showRangeModal}
+        onClose={() => setShowRangeModal(false)}
 
+        tmpFromTs={tmpFromTs}
+        tmpToTs={tmpToTs}
+        setTmpFromTs={setTmpFromTs}
+        setTmpToTs={setTmpToTs}
+
+        iosPickerTarget={iosPickerTarget}
+        setIosPickerTarget={setIosPickerTarget}
+        iosPickerValue={iosPickerValue}
+        setIosPickerValue={setIosPickerValue}
+
+        applyTmpRange={applyTmpRange}
+        clearRange={clearRange}
+        setShowRangeModal={setShowRangeModal}
+      />
     </SafeAreaView>
   );
 }
@@ -681,15 +844,71 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
 
-  actionRow: {
-    paddingHorizontal: 16,
-    paddingTop: 6,
-    paddingBottom: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    zIndex: 19,
-  },
+  topRow: {
+  paddingHorizontal: 16,
+  paddingTop: 6,
+  paddingBottom: 0,
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 10,
+  zIndex: 19,
+},
+
+// 🆕 hàng dưới: range button full width
+bottomRow: {
+  paddingHorizontal: 16,
+  paddingTop: 8,
+  paddingBottom: 0,
+  zIndex: 18,
+},
+
+// ddWrapWeb giữ nguyên như trước
+ddWrapWeb: {
+  position: 'relative',
+  zIndex: 99,
+  minWidth: 220,
+  flex: 1,
+  maxWidth: 360,
+},
+
+// exportBtn giữ nguyên
+exportBtn: {
+  backgroundColor: '#10B981',
+  borderRadius: 12,
+  paddingVertical: 10,
+  paddingHorizontal: 12,
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 8,
+  height: 40,
+},
+
+exportText: {
+  color: '#fff',
+  fontWeight: '800',
+},
+
+// ❗ đổi timeRangeBtn -> timeRangeBtnFull
+timeRangeBtnFull: {
+  width: '100%',
+  borderRadius: 12,
+  borderWidth: 1,
+  borderColor: '#0f172a33',
+  backgroundColor: '#fff',
+  paddingVertical: 10,
+  paddingHorizontal: 12,
+
+  // card-ish look cho dễ thấy
+  borderStyle: 'solid',
+  minHeight: 44,
+  justifyContent: 'center',
+},
+timeRangeBtnLabel: {
+  fontSize: 12,
+  lineHeight: 16,
+  color: '#0f172a',
+  fontWeight: '700',
+},
 
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
@@ -754,6 +973,25 @@ const styles = StyleSheet.create({
   ddItemText: { color: '#111827', fontWeight: '700', textAlign: 'left' },
   ddItemTextActive: { color: '#fff', fontWeight: '800' },
 
+  // 🆕 nút chọn range time
+  timeRangeBtn: {
+    flexShrink: 1,
+    minWidth: 180,
+    maxWidth: 260,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#0f172a33',
+    backgroundColor: '#fff',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  timeRangeBtnLabel: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#0f172a',
+    fontWeight: '700',
+  },
+
   // export
   exportBtn: {
     backgroundColor: '#10B981',
@@ -815,7 +1053,4 @@ const styles = StyleSheet.create({
 
   emptyWrap: { padding: 24, alignItems: 'center' },
   emptyText: { marginTop: 8, color: '#94a3b8', fontWeight: '600' },
-
-   
-
 });
