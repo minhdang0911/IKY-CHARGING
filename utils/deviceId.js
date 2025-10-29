@@ -28,7 +28,6 @@ export async function getOrCreateDeviceId() {
     cachedId = id;
     return id;
   } catch (e) {
-    // lỡ storage lỗi thì vẫn tạo runtime để không kẹt luồng
     const id = genUuidV4();
     cachedId = id;
     return id;
