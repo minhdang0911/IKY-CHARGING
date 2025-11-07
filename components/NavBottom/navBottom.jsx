@@ -11,6 +11,8 @@ import icDevice from '../../assets/img/ic_device.png';
 import icDeviceActive from '../../assets/img/ic_device_active.png';
 import icInfo from '../../assets/img/ic_info.png';
 import icInfoActive from '../../assets/img/ic_info_active.png';
+import icReport from '../../assets/img/ic_report.png';
+import icReportActive from '../../assets/img/ic_report_active.png';
 
 
 const LANG_KEY = 'app_language';
@@ -23,12 +25,14 @@ const STRINGS = {
     Journey: 'Tổng quan',
     Device: 'Thiết bị',
     Information: 'Thông tin',
+    Report:'Báo cáo'
   },
   en: {
     Monitoring: 'Monitoring',
     Journey: 'Overview',
     Device: 'Devices',
     Information: 'Info',
+    Report:'Report'
   },
 };
 
@@ -52,6 +56,7 @@ const BottomTabNavigation = ({ currentScreen, navigateToScreen, hidden = false }
  const tabs = [
   { id: 'Monitoring', icon: icMonitoring, activeIcon: icMonitoringActive },
   { id: 'Journey', icon: icOverview, activeIcon: icOverviewActive },
+  { id: 'Report', icon: icReport, activeIcon: icReportActive },
   { id: 'Device', icon: icDevice, activeIcon: icDeviceActive },
   { id: 'Information', icon: icInfo, activeIcon: icInfoActive },
 ];

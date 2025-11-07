@@ -3,7 +3,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, Image, StyleSheet, Platform } from 'react-native';
 import SearchBar from './SearchBar';
 import Dropdown from './_Dropdown';  
-import icCalendarMonth from '../assets/img/ic_calendar_month (2).png';
+import icCalendarMonth from '../assets/img/ic_calendar_monthh-removebg-preview.png';
 import icExpandMore from '../assets/img/ic_expand_more (2).png';
 
 export default function HistoryFilterBar({

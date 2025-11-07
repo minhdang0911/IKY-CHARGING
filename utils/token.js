@@ -4,3 +4,4 @@ export async function getToken() {
          (await AsyncStorage.getItem('accessToken')) ||
          (await AsyncStorage.getItem('ACCESS_TOKEN')) || null;
 }
+ 
