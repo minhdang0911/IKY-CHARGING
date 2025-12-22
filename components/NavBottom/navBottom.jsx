@@ -3,6 +3,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import icReport from '../../assets/img/ic_report.png';
+import icReportActive from '../../assets/img/ic_report_active.png';
+import { Image as RNImage } from 'react-native';
+
 
 const LANG_KEY = 'app_language';
 const ACTIVE_COLOR = '#4A90E2';
@@ -14,12 +18,14 @@ const STRINGS = {
     Journey: 'Tổng quan',
     Device: 'Thiết bị',
     Information: 'Thông tin',
+    Report:'Báo cáo'
   },
   en: {
     Monitoring: 'Monitoring',
     Journey: 'Overview',
     Device: 'Devices',
     Information: 'Info',
+    Report:'Report'
   },
 };
 
@@ -42,12 +48,14 @@ const BottomTabNavigation = ({ currentScreen, navigateToScreen, hidden = false }
   if (hidden) return null;
 
   // Hai tab đầu dùng text badge: GS / TQ
-  const tabs = [
-    { id: 'Monitoring', type: 'text', text: 'GS' },
-    { id: 'Journey', type: 'text', text: 'TQ' },
-    { id: 'Device', type: 'icon', icon: 'router' },
-    { id: 'Information', type: 'icon', icon: 'info' },
-  ];
+ const tabs = [
+  { id: 'Monitoring', type: 'text', text: 'GS' },
+  { id: 'Journey', type: 'text', text: 'TQ' },
+   { id: 'Report', type: 'image', img: icReport, imgActive: icReportActive }, 
+  { id: 'Device', type: 'icon', icon: 'router' },
+  { id: 'Information', type: 'icon', icon: 'info' },
+ 
+];
 
   const containerStyle = [
     styles.container,
@@ -67,17 +75,24 @@ const BottomTabNavigation = ({ currentScreen, navigateToScreen, hidden = false }
             accessibilityRole="button"
             accessibilityLabel={L[tab.id]}
           >
-            <View style={[styles.iconContainer, isActive && styles.activeIconContainer]}>
-              {tab.type === 'text' ? (
-                <View style={[styles.textBadge, isActive && styles.textBadgeActive]}>
-                  <Text style={[styles.textBadgeLabel, isActive && styles.textBadgeLabelActive]}>
-                    {tab.text}
-                  </Text>
-                </View>
-              ) : (
-                <Icon name={tab.icon} size={24} color={isActive ? ACTIVE_COLOR : INACTIVE_COLOR} />
-              )}
-            </View>
+           <View style={[styles.iconContainer, isActive && styles.activeIconContainer]}>
+  {tab.type === 'text' ? (
+    <View style={[styles.textBadge, isActive && styles.textBadgeActive]}>
+      <Text style={[styles.textBadgeLabel, isActive && styles.textBadgeLabelActive]}>
+        {tab.text}
+      </Text>
+    </View>
+  ) : tab.type === 'image' ? (
+   <RNImage
+  source={isActive ? tab.imgActive : tab.img}
+  style={{ width: 24, height: 24, resizeMode: 'contain' }}
+/>
+
+  ) : (
+    <Icon name={tab.icon} size={24} color={isActive ? ACTIVE_COLOR : INACTIVE_COLOR} />
+  )}
+</View>
+
 
             <Text style={[styles.tabTitle, isActive && styles.activeTabTitle]}>
               {L[tab.id]}

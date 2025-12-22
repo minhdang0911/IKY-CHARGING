@@ -100,6 +100,9 @@ const useScreen = (initialScreen = 'Login') => {
     setCurrentScreen('chargingSession')
   }
 
+  const Report = () =>{
+    setCurrentScreen('Report')
+  }
 
   return {
     currentScreen,
@@ -125,6 +128,7 @@ const useScreen = (initialScreen = 'Login') => {
     activeDevices,
     restoreSession,
     chargingSession,
+    Report,
     // Các hàm shortcut cho từng màn hình
     goToLogin: () => navigateToScreen('Login'),
     goToForgotPassword: () => navigateToScreen('ForgotPassword'),

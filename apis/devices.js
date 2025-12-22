@@ -100,3 +100,54 @@ export async function getOrders(accessToken, { page = 1, limit = 10, search = ''
   });
   return checkResponse(res);  
 }
+
+
+
+const toStartOfDayISO = (d) => {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x.toISOString();
+};
+const toEndOfDayISO = (d) => {
+  const x = new Date(d);
+  x.setHours(23, 59, 59, 999);
+  return x.toISOString();
+};
+
+
+export async function getSessionsByRange(
+  accessToken,
+  { from, to, page = 1, limit = 1000 } = {}
+) {
+  if (!accessToken) throw new Error('Thiếu accessToken');
+  if (!from || !to) throw new Error('Thiếu from/to');
+
+ 
+  const fromISO = toStartOfDayISO(from);
+  const toISO   = toEndOfDayISO(to);
+
+   const p = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+
+    from: fromISO,
+    to: toISO,
+
+    fromDate: fromISO,
+    toDate: toISO,
+
+    startTime: fromISO,
+    endTime: toISO,
+  });
+
+  const url = `${API_URL}/api/session/range?${p.toString()}`;
+ 
+
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${accessToken}` }, 
+  });
+
+   
+  return checkResponse(res);
+}

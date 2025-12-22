@@ -37,6 +37,7 @@ import OrderDetail from './screens/Home/OrderDetail';
 import PaymentConfirm from './screens/Home/PaymentConfirm';
 import ActiveDevicesScreen from './screens/Home/ActiveDevices';
 import ChargingSession from './screens/Home/ChargingSession';
+import ReportScreen from './screens/Home/Report'
 
 // 🔌 SSE manager
 import sseManager from './utils/sseManager';
@@ -175,6 +176,7 @@ const SCREEN_TO_TAB = {
   activeDevices: 'Monitoring',
   paymentConfirm: 'Device',
   chargingSession: 'Device',
+  Report:'Report'
 };
 
 export default function App() {
@@ -332,6 +334,7 @@ export default function App() {
       case 'changeInfo': return <ChangeInfo logout={handleLogout} screenData={screenData} navigateToScreen={navigateToScreen} />;
       case 'activeDevices': return <ActiveDevicesScreen screenData={screenData} navigateToScreen={navigateToScreen} />;
       case 'chargingSession': return <ChargingSession screenData={screenData} navigateToScreen={navigateToScreen} />;
+      case 'Report': return <ReportScreen logout={handleLogout} navigateToScreen={navigateToScreen} />;
       default: return <LoginScreen navigateToScreen={navigateToScreen} login={handleLogin} />;
     }
   };

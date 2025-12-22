@@ -11,6 +11,7 @@ const transpileModules = [
   'react-native-svg',
   'react-native-qrcode-svg',
   'react-native-vector-icons',
+  '@react-native-community/datetimepicker',
 ];
 
 module.exports = {
@@ -18,50 +19,63 @@ module.exports = {
 
   entry: './index.web.js',
 
-  module: {
-    rules: [
-      {
-        test: /\.(js|jsx|ts|tsx)$/,
-        exclude: (modulePath) => {
-          if (modulePath.includes('node_modules')) {
-            // Chỉ giữ lại các module cần transpile, còn lại loại bỏ
-            return !transpileModules.some((m) =>
-              modulePath.includes(`${path.sep}${m}${path.sep}`)
-            );
-          }
-          return false; // src code của project thì luôn transpile
+module: {
+  rules: [
+    {
+      test: /\.(js|jsx|ts|tsx)$/,
+      exclude: (modulePath) => {
+        if (modulePath.includes('node_modules')) {
+          // Chỉ giữ lại các module cần transpile, còn lại loại bỏ
+          return !transpileModules.some((m) =>
+            modulePath.includes(`${path.sep}${m}${path.sep}`)
+          );
+        }
+        return false; // src code của project thì luôn transpile
+      },
+      use: {
+        loader: 'babel-loader',
+        options: {
+          presets: [
+            ['@babel/preset-env', { modules: false }],
+            '@babel/preset-react',
+            'module:metro-react-native-babel-preset',
+          ],
+          plugins: [
+            '@babel/plugin-transform-flow-strip-types',
+            ['@babel/plugin-transform-runtime', { helpers: true }],
+            ['@babel/plugin-transform-class-properties', { loose: true }],
+            ['@babel/plugin-transform-private-methods', { loose: true }],
+            ['@babel/plugin-transform-private-property-in-object', { loose: true }],
+            [
+              'module:react-native-dotenv',
+              { moduleName: '@env', path: '.env', allowUndefined: true },
+            ],
+          ],
         },
-        use: {
-          loader: 'babel-loader',
+      },
+    },
+    {
+      test: /\.(png|jpg|gif|svg|ico)$/i,
+      type: 'asset/resource',
+      generator: {
+        filename: 'assets/[name][hash][ext][query]',
+      },
+    },
+    // ✅ DÙNG FILE-LOADER
+    {
+      test: /\.(xlsx|xls|csv)$/,
+      use: [
+        {
+          loader: 'file-loader',
           options: {
-            presets: [
-              ['@babel/preset-env', { modules: false }],
-              '@babel/preset-react',
-              'module:metro-react-native-babel-preset',
-            ],
-            plugins: [
-              '@babel/plugin-transform-flow-strip-types',
-              ['@babel/plugin-transform-runtime', { helpers: true }],
-              ['@babel/plugin-transform-class-properties', { loose: true }],
-              ['@babel/plugin-transform-private-methods', { loose: true }],
-              ['@babel/plugin-transform-private-property-in-object', { loose: true }],
-              [
-                'module:react-native-dotenv',
-                { moduleName: '@env', path: '.env', allowUndefined: true },
-              ],
-            ],
+            name: '[name].[ext]',
+            outputPath: 'template/',
           },
         },
-      },
-      {
-        test: /\.(png|jpg|gif|svg|ico)$/i,
-        type: 'asset/resource',
-        generator: {
-          filename: 'assets/[name][hash][ext][query]',
-        },
-      },
-    ],
-  },
+      ],
+    },
+  ],
+},
 
   resolve: {
     alias: {
@@ -73,6 +87,16 @@ module.exports = {
         __dirname,
         'web-mocks/MaterialIcons.web.js'
       ),
+
+        'react-native-document-picker': path.resolve(
+      __dirname,
+      'web-mocks/document-picker.web.js'
+    ),
+
+     '@react-native-community/datetimepicker': path.resolve(
+      __dirname,
+      'web-mocks/datetimepicker.web.js'
+    ),
 
       // ✅ Mock native lib không có trên web
       'react-native-fs': path.resolve(__dirname, 'web-mocks/react-native-fs.js'),

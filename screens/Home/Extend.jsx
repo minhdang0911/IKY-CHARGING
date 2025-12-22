@@ -2,18 +2,23 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, KeyboardAvoidingView,
-  Platform, TextInput, Linking, ActivityIndicator, Modal, BackHandler, PanResponder,
-  Image, Animated, Easing, useWindowDimensions
+  Platform, Linking, ActivityIndicator, Modal, BackHandler, PanResponder,
+  Image, Animated, Easing, useWindowDimensions, ScrollView
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import QRCode from 'react-native-qrcode-svg';
+import QRCodeLib from 'qrcode';
+
 import { getPublicPricingPlans, createOrder, createOrderCash } from '../../apis/payment';
 import { getDevices } from '../../apis/devices';
 
 // logos
+import vietQRlogo from '../../assets/img/unnamed (1).png';
 import momologo from '../../assets/img/momo.png';
-import vnpaylogo from '../../assets/img/vnpay.jpg';
 import cashlogo from '../../assets/img/cash.png';
+
+import vietQrFrame from '../../assets/img/template.png';
 
 /* ================= THEME ================= */
 const UI = {
@@ -26,10 +31,24 @@ const UI = {
   good: '#16A34A',
 };
 
-// Chỉ coi là rảnh khi thuộc nhóm này
 const IDLE_STATES = ['idle', 'available', 'free', 'ready'];
 
-/* ================= Small utils ================= */
+/**
+ * Frame template.png gốc 850x1100
+ * Vùng QR: left=160, top=239, width=528, height=526
+ */
+const FRAME_BOX = {
+  leftPct: 160 / 850,
+  topPct: 239 / 1100,
+  widthPct: 528 / 850,
+  heightPct: 526 / 1100,
+  padding: 8,
+};
+
+const QR_TTL_MS = 30 * 60 * 1000;
+const QR_CACHE_KEY = 'vietqr_cache_v1';
+
+/* ================= utils ================= */
 const onlyMessage = (err) => {
   try {
     if (err?.response?.data?.message) return String(err.response.data.message);
@@ -43,6 +62,31 @@ const onlyMessage = (err) => {
   } catch {
     return 'Có lỗi xảy ra, thử lại sau.';
   }
+};
+
+const parseExpDate = (expDateStr) => {
+  if (!expDateStr) return null;
+  const s = String(expDateStr);
+  if (s.length < 10) return null;
+  const yy = Number(s.slice(0, 2));
+  const MM = Number(s.slice(2, 4));
+  const dd = Number(s.slice(4, 6));
+  const HH = Number(s.slice(6, 8));
+  const mm = Number(s.slice(8, 10));
+  if (![yy, MM, dd, HH, mm].every((n) => Number.isFinite(n))) return null;
+  return new Date(2000 + yy, MM - 1, dd, HH, mm, 0);
+};
+
+const pad2 = (n) => String(n).padStart(2, '0');
+const fmtDateTimeVN = (d) => {
+  if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())} ${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+};
+const msToMMSS = (ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${pad2(m)}:${pad2(r)}`;
 };
 
 /* ============== Custom Alert ============== */
@@ -66,7 +110,7 @@ const CustomAlert = ({ visible, title = 'Thông báo', message = '', onClose }) 
   );
 };
 
-/* ============== Reusable Custom Select (centered modal) ============== */
+/* ============== CustomSelect ============== */
 const CustomSelect = ({
   label,
   placeholder = 'Chọn…',
@@ -84,6 +128,7 @@ const CustomSelect = ({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
 
+  
   const filtered = useMemo(() => {
     if (!q) return options;
     const qq = q.toLowerCase();
@@ -107,53 +152,50 @@ const CustomSelect = ({
         <Icon name={rightIcon} size={20} color={UI.sub} />
       </TouchableOpacity>
 
-      {/* CENTERED DIALOG */}
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setOpen(false)}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
-            <TouchableOpacity activeOpacity={1} style={styles.sheet}>
-              <View style={styles.sheetHeader}>
-                <Text style={styles.sheetTitle}>{label || 'Chọn'}</Text>
-                <TouchableOpacity onPress={() => setOpen(false)}>
-                  <Icon name="close" size={22} color={UI.sub} />
-                </TouchableOpacity>
-              </View>
+          <TouchableOpacity activeOpacity={1} style={styles.sheet}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>{label || 'Chọn'}</Text>
+              <TouchableOpacity onPress={() => setOpen(false)}>
+                <Icon name="close" size={22} color={UI.sub} />
+              </TouchableOpacity>
+            </View>
 
-              <FlatList
-                data={filtered}
-                keyExtractor={keyExtractor}
-                keyboardShouldPersistTaps="handled"
-                ItemSeparatorComponent={() => <View style={styles.separator} />}
-                renderItem={({ item }) => {
-                  const isOn = keyExtractor(item) === keyExtractor(value || {});
-                  return (
-                    <TouchableOpacity
-                      activeOpacity={0.9}
-                      style={[styles.optionItem, isOn && { backgroundColor: '#F0F6FF' }]}
-                      onPress={() => { onChange?.(item); setOpen(false); }}
-                    >
-                      {renderOption ? (
-                        renderOption(item, isOn)
-                      ) : (
-                        <>
-                          <Text style={[styles.optionText, isOn && { color: UI.accent, fontWeight: '700' }]}>
-                            {getLabel(item)}
-                          </Text>
-                          {isOn && <Icon name="check" size={18} color={UI.accent} />}
-                        </>
-                      )}
-                    </TouchableOpacity>
-                  );
-                }}
-                style={{ maxHeight: 420 }}
-                ListEmptyComponent={
-                  <View style={{ padding: 16, alignItems: 'center' }}>
-                    <Text style={{ color: UI.sub }}>Không có lựa chọn phù hợp</Text>
-                  </View>
-                }
-              />
-            </TouchableOpacity>
-          </KeyboardAvoidingView>
+            <FlatList
+              data={filtered}
+              keyExtractor={keyExtractor}
+              keyboardShouldPersistTaps="handled"
+              ItemSeparatorComponent={() => <View style={styles.separator} />}
+              renderItem={({ item }) => {
+                const isOn = keyExtractor(item) === keyExtractor(value || {});
+                return (
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={[styles.optionItem, isOn && { backgroundColor: '#F0F6FF' }]}
+                    onPress={() => { onChange?.(item); setOpen(false); }}
+                  >
+                    {renderOption ? (
+                      renderOption(item, isOn)
+                    ) : (
+                      <>
+                        <Text style={[styles.optionText, isOn && { color: UI.accent, fontWeight: '700' }]}>
+                          {getLabel(item)}
+                        </Text>
+                        {isOn && <Icon name="check" size={18} color={UI.accent} />}
+                      </>
+                    )}
+                  </TouchableOpacity>
+                );
+              }}
+              style={{ maxHeight: 420 }}
+              ListEmptyComponent={
+                <View style={{ padding: 16, alignItems: 'center' }}>
+                  <Text style={{ color: UI.sub }}>Không có lựa chọn phù hợp</Text>
+                </View>
+              }
+            />
+          </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
     </View>
@@ -162,10 +204,9 @@ const CustomSelect = ({
 
 /* ================= MAIN ================= */
 export default function Extend({ navigateToScreen, screenData }) {
-  const { width } = useWindowDimensions();
-  const isDesktop = width >= 1024;
+  const { width: winW } = useWindowDimensions();
+  const isDesktop = winW >= 1024;
 
-  // biến device thành state để có thể cập nhật realtime
   const [device, setDevice] = useState(screenData?.device || {});
   const agentId = device?.agent_id?._id || '';
   const deviceId = device?._id || '';
@@ -177,41 +218,53 @@ export default function Extend({ navigateToScreen, screenData }) {
   const [selectedPlan, setSelectedPlan] = useState(null);
   const [selectedPort, setSelectedPort] = useState(null);
   const [selectedPayment, setSelectedPayment] = useState(null);
-  const [phone, setPhone] = useState('');
 
   const [creating, setCreating] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState(null);
 
-  // custom alert state
   const [showAlert, setShowAlert] = useState(false);
   const [alertMsg, setAlertMsg] = useState('');
 
   const navigatingRef = useRef(false);
 
-  // animation badge success
-  const successPulse = useRef(new Animated.Value(1)).current;
+  // ===== VietQR export/download =====
+  const qrRef = useRef(null);
+  const [frameLayout, setFrameLayout] = useState({ w: 0, h: 0 });
+
+  // ===== VietQR "xem lại" cache =====
+  const [cachedVietQrOrder, setCachedVietQrOrder] = useState(null);
+
+  // countdown tick
+  const [nowTick, setNowTick] = useState(Date.now());
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(successPulse, { toValue: 1.08, duration: 650, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-        Animated.timing(successPulse, { toValue: 1, duration: 650, easing: Easing.in(Easing.quad), useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [successPulse]);
+    if (!orderSuccess || orderSuccess.method !== 'vietQR' || orderSuccess.isViewAgain) return;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [orderSuccess]);
+
+  const qrBox = useMemo(() => {
+    const w = frameLayout.w || 0;
+    const h = frameLayout.h || 0;
+
+    const boxW = w * FRAME_BOX.widthPct;
+    const boxH = h * FRAME_BOX.heightPct;
+
+    const size = Math.max(0, Math.min(boxW, boxH) - FRAME_BOX.padding * 2);
+
+    const boxLeft = w * FRAME_BOX.leftPct;
+    const boxTop = h * FRAME_BOX.topPct;
+
+    const left = boxLeft + (boxW - size) / 2;
+    const top = boxTop + (boxH - size) / 2;
+
+    return { left, top, size };
+  }, [frameLayout]);
 
   const goBack = useCallback(() => {
-    if (navigatingRef.current) return;
-    navigatingRef.current = true;
-    try {
-      navigateToScreen?.('Device');
-    } finally {
-      setTimeout(() => { navigatingRef.current = false; }, 300);
-    }
-  }, [navigateToScreen]);
+    setOrderSuccess(null);
+  }, []);
 
-  // ANDROID: back cứng -> chỉ back trang
+  // Android hardware back
   useEffect(() => {
     const onHWBack = () => {
       goBack();
@@ -221,31 +274,7 @@ export default function Extend({ navigateToScreen, screenData }) {
     return () => sub.remove();
   }, [goBack]);
 
-  // ✅ WEB: chặn nút Back của trình duyệt -> quay về Device
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-
-    // Tuỳ app của m: giữ nguyên root hoặc route hiện tại
-    const TARGET_PATH = '/';
-    // Ghim URL hiện tại về TARGET_PATH để khi back không rời app
-    window.history.replaceState(null, '', TARGET_PATH);
-
-    const handlePopState = () => {
-      // giữ URL cố định & điều hướng nội bộ
-      window.history.replaceState(null, '', TARGET_PATH);
-      goBack();
-    };
-
-    // đẩy thêm một state để bắt popstate
-    window.history.pushState(null, '', TARGET_PATH);
-    window.addEventListener('popstate', handlePopState);
-
-    return () => {
-      window.removeEventListener('popstate', handlePopState);
-    };
-  }, [goBack]);
-
-  // iOS: edge swipe từ mép trái để back
+  // iOS edge swipe
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: (e, g) => Platform.OS === 'ios' && g.x0 <= 20,
@@ -273,7 +302,7 @@ export default function Extend({ navigateToScreen, screenData }) {
           if (!IDLE_STATES.includes(latestStatus)) setSelectedPort(null);
         }
       }
-    } catch {}
+    } catch { }
   }, [deviceId, device?.device_code, selectedPort]);
 
   useEffect(() => { refreshDevice(); }, [refreshDevice]);
@@ -288,8 +317,8 @@ export default function Extend({ navigateToScreen, screenData }) {
   );
 
   const paymentMethods = [
+    { id: 'vietqr', name: 'VietQR', type: 'vietQR', icon: vietQRlogo },
     { id: 'momo', name: 'MoMo', type: 'momo', icon: momologo },
-    { id: 'vnpay', name: 'VNPay', type: 'vnpay', icon: vnpaylogo },
     { id: 'cash', name: 'Tiền mặt', type: 'cash', icon: cashlogo },
   ];
 
@@ -309,8 +338,7 @@ export default function Extend({ navigateToScreen, screenData }) {
         }))
       );
     } catch (e) {
-      const msg = onlyMessage(e);
-      setAlertMsg(msg);
+      setAlertMsg(onlyMessage(e));
       setShowAlert(true);
     } finally {
       setPlanLoading(false);
@@ -319,7 +347,6 @@ export default function Extend({ navigateToScreen, screenData }) {
 
   useEffect(() => { fetchPlans(); }, [fetchPlans]);
 
-  /* ===== Validate port before create ===== */
   const ensurePortStillIdle = useCallback(async (portNumber) => {
     try {
       const token = await AsyncStorage.getItem('access_token');
@@ -334,6 +361,107 @@ export default function Extend({ navigateToScreen, screenData }) {
       return true;
     }
   }, [deviceId, device?.device_code]);
+
+  /* ===== Cache helpers ===== */
+  const makeCacheKey = useCallback(() => {
+    const deviceKey = device?._id || device?.device_code || '';
+    const planKey = selectedPlan?.id || '';
+    const portKey = selectedPort?.portNumber != null ? String(selectedPort.portNumber) : '';
+    return `${deviceKey}|${planKey}|${portKey}`;
+  }, [device, selectedPlan, selectedPort]);
+
+  const loadCachedVietQr = useCallback(async () => {
+    try {
+      const key = makeCacheKey();
+      if (!key || !selectedPayment || selectedPayment?.type !== 'vietQR') {
+        setCachedVietQrOrder(null);
+        return;
+      }
+
+      const raw = await AsyncStorage.getItem(QR_CACHE_KEY);
+      const obj = raw ? JSON.parse(raw) : {};
+      const hit = obj?.[key] || null;
+      if (!hit) {
+        setCachedVietQrOrder(null);
+        return;
+      }
+
+      const expFromExpDate = parseExpDate(hit.expDate);
+      const expMs = expFromExpDate?.getTime?.() || (Number(hit.createdAt || 0) + QR_TTL_MS);
+      const ok = Date.now() < expMs;
+
+      setCachedVietQrOrder(ok ? hit : null);
+
+      if (!ok) {
+        const next = { ...(obj || {}) };
+        delete next[key];
+        await AsyncStorage.setItem(QR_CACHE_KEY, JSON.stringify(next));
+      }
+    } catch {
+      setCachedVietQrOrder(null);
+    }
+  }, [makeCacheKey, selectedPayment]);
+
+  useEffect(() => {
+    loadCachedVietQr();
+  }, [loadCachedVietQr]);
+
+  const saveCachedVietQr = useCallback(async (payload) => {
+    try {
+      const key = `${payload.deviceId || ''}|${payload.planId || ''}|${String(payload.portNumber ?? '')}`;
+      const raw = await AsyncStorage.getItem(QR_CACHE_KEY);
+      const obj = raw ? JSON.parse(raw) : {};
+      obj[key] = payload;
+      await AsyncStorage.setItem(QR_CACHE_KEY, JSON.stringify(obj));
+    } catch { }
+  }, []);
+
+  /* ===== Download QR ===== */
+  const downloadQrImage = useCallback(async () => {
+    try {
+      if (!orderSuccess?.qrData) {
+        setAlertMsg('Thiếu dữ liệu QR để xuất ảnh.');
+        setShowAlert(true);
+        return;
+      }
+
+      // WEB: generate png dataURL
+      if (Platform.OS === 'web') {
+        const dataUrl = await QRCodeLib.toDataURL(orderSuccess.qrData, {
+          width: 900,
+          margin: 1,
+          errorCorrectionLevel: 'M',
+          type: 'image/png',
+        });
+
+        const a = document.createElement('a');
+        a.href = dataUrl;
+        a.download = `vietqr_${orderSuccess?.orderId || 'order'}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return;
+      }
+
+      // Native
+      if (!qrRef.current?.toDataURL) {
+        setAlertMsg('Không thể export QR lúc này.');
+        setShowAlert(true);
+        return;
+      }
+
+      qrRef.current.toDataURL((data) => {
+        const uri = `data:image/png;base64,${data}`;
+        Linking.openURL(uri).catch(() => {
+          setAlertMsg('Thiết bị không hỗ trợ tải trực tiếp. Cần tích hợp thư viện lưu ảnh.');
+          setShowAlert(true);
+        });
+      });
+    } catch (e) {
+      setAlertMsg(e?.message || 'Tải ảnh thất bại.');
+      setShowAlert(true);
+    }
+  }, [orderSuccess]);
 
   /* ===== Create Order ===== */
   const handleCreateOrder = useCallback(async () => {
@@ -360,23 +488,23 @@ export default function Extend({ navigateToScreen, screenData }) {
         device_id: device?._id || '',
         pricing_plan_id: selectedPlan.id,
         portNumber: selectedPort.portNumber,
-        ...(phone ? { phone } : {}),
       };
 
-      const method = selectedPayment.type;
+      const method = selectedPayment.type; // momo | cash | vietQR
       const payload = { ...basePayload, payment_method: method };
-      const api = method === 'momo' ? createOrder : createOrderCash;
 
+      const api = method === 'cash' ? createOrderCash : createOrder;
       const res = await api(token, payload);
 
-      const orderId    = res?.orderId    ?? res?.order_id   ?? null;
-      const paymentUrl = res?.paymentUrl ?? res?.data       ?? null;
-      const amount     = res?.amount     ?? selectedPlan?.raw?.price
-                                      ?? selectedPlan?.price ?? 0;
+      const orderId = res?.orderId ?? res?.order_id ?? null;
+      const paymentUrl = res?.paymentUrl ?? (method === 'momo' ? res?.data : null);
+      const qrData = method === 'vietQR' ? (res?.data ?? null) : null;
+      const amount = res?.amount ?? selectedPlan?.raw?.price ?? selectedPlan?.price ?? 0;
 
-      setOrderSuccess({
+      const next = {
         orderId,
         paymentUrl,
+        qrData,
         method,
         planName: selectedPlan?.raw?.name ?? selectedPlan?.name,
         amount,
@@ -384,49 +512,157 @@ export default function Extend({ navigateToScreen, screenData }) {
         deviceName: device?.name || '',
         deviceCode: device?.device_code || '',
         expDate: res?.expDate || null,
-        createdAt: res?.createdAt || null,
-      });
+        createdAt: res?.createdAt || Date.now(),
+        isViewAgain: false,
+      };
+
+      setOrderSuccess(next);
+
+      if (method === 'vietQR') {
+        await saveCachedVietQr({
+          deviceId: device?._id || device?.device_code || '',
+          planId: selectedPlan?.id || '',
+          portNumber: selectedPort?.portNumber,
+          orderId: next.orderId,
+          qrData: next.qrData,
+          expDate: next.expDate,
+          createdAt: next.createdAt,
+        });
+        await loadCachedVietQr();
+      }
     } catch (err) {
       setAlertMsg(onlyMessage(err));
       setShowAlert(true);
     } finally {
       setCreating(false);
     }
-  }, [selectedPlan, selectedPort, selectedPayment, phone, device, ensurePortStillIdle, refreshDevice]);
+  }, [selectedPlan, selectedPort, selectedPayment, device, ensurePortStillIdle, refreshDevice, saveCachedVietQr, loadCachedVietQr]);
 
-  /* ===== Success Screen ===== */
+  /* =================== SUCCESS SCREENS =================== */
   if (orderSuccess) {
+    if (orderSuccess.method === 'vietQR') {
+      // ✅ giảm padding + tránh che nút
+      const outerPadding = isDesktop ? 12 : 10;
+
+      // ✅ giảm height khung để lộ 2 nút
+      const frameW = Math.min(520, Math.max(300, winW * (isDesktop ? 0.40 : 0.76)));
+      const rawH = frameW * (1100 / 850);
+      const frameH = Math.min(rawH, isDesktop ? 520 : 440); // ✅ giảm
+
+      // exp info (chỉ show khi vừa tạo, không show khi xem lại)
+      const expDt = parseExpDate(orderSuccess.expDate);
+      const expMs = expDt?.getTime?.() || (Number(orderSuccess.createdAt || 0) + QR_TTL_MS);
+      const remainMs = expMs - nowTick;
+      const expired = remainMs <= 0;
+
+      const isViewAgain = !!orderSuccess.isViewAgain;
+
+      return (
+        <View style={[styles.container, { padding: outerPadding }]}>
+          <ScrollView
+            contentContainerStyle={{
+              alignItems: 'center',
+              paddingBottom: 110, // ✅ chừa chỗ cho bottom nav, không che 2 nút
+            }}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={[styles.successOnlyWrap, { padding: isDesktop ? 14 : 12 }]}>
+              {/* ✅ Nếu xem lại: CHỈ hiện QR + 2 nút */}
+              {!isViewAgain ? (
+                <>
+                 <View style={styles.successBadge}>
+
+                    <Icon name="check" size={30} color="#fff" />
+                  </View>
+                  <Text style={styles.successTitle}>Tạo đơn thành công!</Text>
+                  <Text style={styles.successSubtitle}>Vui lòng quét QR để thanh toán.</Text>
+                </>
+              ) : null}
+
+              <View style={{ marginTop: isViewAgain ? 6 : 12, alignItems: 'center' }}>
+                <View
+                  style={[styles.vietqrFrameWrap, { width: frameW, height: frameH }]}
+                  onLayout={(e) => {
+                    const { width: w, height: h } = e.nativeEvent.layout;
+                    setFrameLayout({ w, h });
+                  }}
+                >
+                  <Image source={vietQrFrame} style={styles.vietqrFrameImg} resizeMode="contain" />
+                  <View
+                    style={[
+                      styles.vietqrQrOverlayAbs,
+                      { left: qrBox.left, top: qrBox.top, width: qrBox.size, height: qrBox.size }
+                    ]}
+                  >
+                    <QRCode
+                      value={orderSuccess.qrData || ''}
+                      size={Math.max(0, qrBox.size)}
+                      ecl="M"
+                      getRef={(c) => (qrRef.current = c)}
+                    />
+                  </View>
+                </View>
+
+                {/* ✅ note chỉ hiện khi vừa tạo đơn, không hiện khi xem lại */}
+                {!isViewAgain ? (
+                  <View style={styles.qrNoteWrap}>
+                    <Text style={styles.qrNoteText}>
+                      Mã QR này sẽ hết hạn sau <Text style={{ fontWeight: '800' }}>30 phút</Text>.
+                    </Text>
+                    <Text style={styles.qrNoteText}>
+                      Hết hạn lúc: <Text style={{ fontWeight: '800' }}>{expDt ? fmtDateTimeVN(expDt) : '—'}</Text>
+                      {expired ? <Text style={{ fontWeight: '900', color: '#DC2626' }}> (đã hết hạn)</Text> : null}
+                    </Text>
+                    {!expired ? (
+                      <Text style={styles.qrCountdown}>Còn lại: {msToMMSS(remainMs)}</Text>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+
+              <View style={[styles.actionRow, { marginTop: 14, marginBottom: 6 }]}>
+                <TouchableOpacity style={[styles.btnGhost, { flex: 1 }]} onPress={goBack}>
+                  <Text style={[styles.btnGhostText, { fontSize: 30 }]}>{'‹'}</Text>
+                  <Text style={styles.btnGhostText}>Quay lại</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.btnPrimary, { flex: 1 }, (!isViewAgain && expired) && { opacity: 0.6 }]}
+                  onPress={downloadQrImage}
+                  disabled={!isViewAgain && expired}
+                >
+                  <Icon name="download" size={18} color="#fff" style={{ marginRight: 8 }} />
+                  <Text style={styles.btnText}>Tải ảnh</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+
+          <CustomAlert visible={showAlert} message={alertMsg} onClose={() => setShowAlert(false)} />
+        </View>
+      );
+    }
+
+    // ===== momo / cash success giữ như cũ =====
     const payBtnLabel =
-      orderSuccess.method === 'momo'
-        ? 'Thanh toán MoMo'
-        : orderSuccess.method === 'vnpay'
-        ? 'Thanh toán VNPay'
-        : 'Đã nhận tiền mặt';
-    const canOpen =
-      !!orderSuccess.paymentUrl &&
-      (orderSuccess.method === 'momo' || orderSuccess.method === 'vnpay');
+      orderSuccess.method === 'momo' ? 'Thanh toán MoMo' : 'Đã nhận tiền mặt';
+
+    const canOpen = !!orderSuccess.paymentUrl && orderSuccess.method === 'momo';
 
     return (
       <View style={[styles.container, { padding: 16, justifyContent: 'center' }]}>
         <View style={styles.successWrap}>
-          <Animated.View style={[styles.successBadge, { transform: [{ scale: successPulse }] }]}>
+         <View style={styles.successBadge}>
+
             <Icon name="check" size={30} color="#fff" />
-          </Animated.View>
+          </View>
 
           <Text style={styles.successTitle}>Tạo đơn thành công!</Text>
           <Text style={styles.successSubtitle}>
             {orderSuccess.method === 'cash'
               ? 'Đã ghi nhận thanh toán tiền mặt.'
-              : (orderSuccess.method === 'vnpay'
-                  ? 'Đơn hàng VNPay đã sẵn sàng.'
-                  : 'Đơn hàng MoMo đã tạo.')}
+              : 'Đơn hàng MoMo đã tạo.'}
           </Text>
-
-          {orderSuccess.method === 'momo' && (
-            <View style={styles.successInfoCard}>
-              <Row k="Mã đơn" v={orderSuccess.orderId || '—'} />
-            </View>
-          )}
 
           <View style={styles.successInfoCard}>
             <Row k="Thiết bị" v={orderSuccess.deviceName || '—'} />
@@ -445,7 +681,7 @@ export default function Extend({ navigateToScreen, screenData }) {
               style={[styles.btn, styles.ctaBtn]}
               onPress={() => Linking.openURL(orderSuccess.paymentUrl)}
             >
-              <Icon name="open-in-new" size={18} color="#fff" style={{ marginRight: 8 }} />
+            
               <Text style={styles.btnText}>{payBtnLabel}</Text>
             </TouchableOpacity>
           ) : (
@@ -477,16 +713,19 @@ export default function Extend({ navigateToScreen, screenData }) {
           </View>
         </View>
 
-        <CustomAlert
-          visible={showAlert}
-          message={alertMsg}
-          onClose={() => setShowAlert(false)}
-        />
+        <CustomAlert visible={showAlert} message={alertMsg} onClose={() => setShowAlert(false)} />
       </View>
     );
   }
 
-  /* ===== Main Form ===== */
+  /* =================== MAIN FORM =================== */
+  const showViewAgainBtn =
+    selectedPayment?.type === 'vietQR' &&
+    !!selectedPlan &&
+    !!selectedPort &&
+    !!cachedVietQrOrder &&
+    !!cachedVietQrOrder.qrData;
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: UI.bg }}
@@ -496,7 +735,7 @@ export default function Extend({ navigateToScreen, screenData }) {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={goBack} style={{ padding: 6 }}>
-          <Text style={{fontSize: 30, color: '#fff'}}>{'‹'}</Text>
+          <Text style={{ fontSize: 30, color: '#fff' }}>{'‹'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Tạo đơn hàng</Text>
         <TouchableOpacity onPress={refreshDevice} style={{ padding: 6 }}>
@@ -512,7 +751,6 @@ export default function Extend({ navigateToScreen, screenData }) {
           </Text>
         </View>
 
-        {/* Selects: GRID */}
         <View style={{ marginTop: 10 }}>
           <View style={[styles.grid, isDesktop && styles.gridDesktop]}>
             <View style={styles.col}>
@@ -547,7 +785,7 @@ export default function Extend({ navigateToScreen, screenData }) {
               <CustomSelect
                 label="Phương thức thanh toán"
                 placeholder="Chọn phương thức"
-                options={['momo','vnpay','cash'].map(id => paymentMethods.find(p => p.id === id))}
+                options={['vietqr', 'momo', 'cash'].map(id => paymentMethods.find(p => p.id === id))}
                 value={selectedPayment}
                 onChange={setSelectedPayment}
                 getLabel={(it) => it?.name || ''}
@@ -573,8 +811,7 @@ export default function Extend({ navigateToScreen, screenData }) {
             </View>
           </View>
 
-          {/* Button gọn */}
-          <View style={{ marginTop: 4, alignItems: 'center' }}>
+          <View style={{ marginTop: 10, alignItems: 'center' }}>
             <TouchableOpacity
               style={[
                 styles.btn, styles.btnNarrow,
@@ -586,15 +823,32 @@ export default function Extend({ navigateToScreen, screenData }) {
             >
               {creating ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Tạo đơn hàng</Text>}
             </TouchableOpacity>
+
+            {/* ✅ Xem lại (mở màn QR minimal: chỉ QR + 2 nút) */}
+            {showViewAgainBtn ? (
+              <TouchableOpacity
+                style={[styles.btnGhostSmall, { marginTop: 10 }]}
+                activeOpacity={0.9}
+                onPress={() => {
+                  setOrderSuccess({
+                    method: 'vietQR',
+                    isViewAgain: true, // ✅ minimal UI
+                    orderId: cachedVietQrOrder.orderId,
+                    qrData: cachedVietQrOrder.qrData,
+                    expDate: cachedVietQrOrder.expDate,
+                    createdAt: cachedVietQrOrder.createdAt,
+                  });
+                }}
+              >
+ 
+                <Text style={styles.btnGhostSmallText}>Xem lại mã QR</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
       </View>
 
-      <CustomAlert
-        visible={showAlert}
-        message={alertMsg}
-        onClose={() => setShowAlert(false)}
-      />
+      <CustomAlert visible={showAlert} message={alertMsg} onClose={() => setShowAlert(false)} />
     </KeyboardAvoidingView>
   );
 }
@@ -625,7 +879,6 @@ const styles = StyleSheet.create({
   },
   headerTitle: { textAlign: 'center', color: '#fff', fontSize: 18, fontWeight: '800' },
 
-  // compact labels & selects
   label: { fontSize: 12.5, color: UI.sub, marginBottom: 4 },
   selectBox: {
     borderWidth: 1, borderColor: UI.border, borderRadius: 10,
@@ -634,7 +887,6 @@ const styles = StyleSheet.create({
   },
   selectText: { fontSize: 14.5, color: UI.text },
 
-  // centered modal
   modalBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.18)',
@@ -657,23 +909,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 6,
   },
-  sheetHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8
-  },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   sheetTitle: { fontWeight: '800', color: UI.text, fontSize: 16 },
 
-  searchWrap: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderWidth: 1, borderColor: UI.border, backgroundColor: '#F8FAFC',
-    borderRadius: 10, paddingHorizontal: 10, height: 38, marginBottom: 8
-  },
-  searchInput: { flex: 1, color: UI.text },
-
   separator: { height: 1, backgroundColor: UI.border },
-  optionItem: {
-    paddingVertical: 10, paddingHorizontal: 10,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'
-  },
+  optionItem: { paddingVertical: 10, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   optionText: { fontSize: 15, color: UI.text },
 
   deviceBar: {
@@ -689,27 +929,28 @@ const styles = StyleSheet.create({
   },
   deviceText: { marginLeft: 8, color: UI.text, fontWeight: '600' },
 
-  inputWrap: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderWidth: 1, borderColor: UI.border, backgroundColor: UI.surface,
-    borderRadius: 10, paddingHorizontal: 10, height: 42
-  },
-  input: { flex: 1, color: UI.text },
-
-  // GRID compact
   grid: { gap: 10 },
   gridDesktop: { flexDirection: 'row', flexWrap: 'wrap' },
   col: { flexBasis: '100%', flexGrow: 1, minWidth: 260 },
 
-  btn: {
-    backgroundColor: UI.accent,
-    paddingVertical: 10, borderRadius: 12,
-    paddingHorizontal: 18,
-  },
+  btn: { backgroundColor: UI.accent, paddingVertical: 10, borderRadius: 12, paddingHorizontal: 18 },
   btnNarrow: { minWidth: 240, alignItems: 'center' },
   btnText: { color: '#fff', fontSize: 15, fontWeight: '800', textAlign: 'center' },
 
-  // Success screen
+  btnGhostSmall: {
+    borderWidth: 1,
+    borderColor: UI.accent,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 240,
+    backgroundColor: '#fff',
+  },
+  btnGhostSmallText: { color: UI.accent, fontWeight: '800' },
+
   successWrap: {
     backgroundColor: '#fff',
     borderRadius: 18,
@@ -728,8 +969,9 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 6,
   },
-  successTitle: { fontSize: 20, fontWeight: '900', textAlign: 'center', marginTop: 12, color: '#111827' },
+  successTitle: { fontSize: 20, fontWeight: '900', textAlign: 'center', marginTop: 10, color: '#111827' },
   successSubtitle: { fontSize: 13, color: '#6B7280', textAlign: 'center', marginTop: 4 },
+
   successInfoCard: {
     marginTop: 14,
     backgroundColor: '#F8FAFF',
@@ -748,9 +990,44 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: UI.accent, borderRadius: 12, paddingVertical: 10,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flex: 1
   },
-  btnGhostText: { color: UI.accent, fontWeight: '500', fontSize: 12 },
+  btnGhostText: { color: UI.accent, fontWeight: '700', fontSize: 14 },
 
-  // CustomAlert styles
+  // ===== VietQR UI =====
+  successOnlyWrap: {
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#E7EEF9',
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 760,
+  },
+  vietqrFrameWrap: { position: 'relative' },
+  vietqrFrameImg: { width: '100%', height: '100%' },
+  vietqrQrOverlayAbs: { position: 'absolute', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+
+  qrNoteWrap: { marginTop: 8, alignItems: 'center' },
+  qrNoteText: { fontSize: 12.5, color: UI.sub, textAlign: 'center', lineHeight: 18 },
+  qrCountdown: { marginTop: 4, fontSize: 13, fontWeight: '900', color: UI.text },
+
+  actionRow: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+    maxWidth: 520,
+    paddingHorizontal: 2,
+  },
+  btnPrimary: {
+    backgroundColor: UI.accent,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Alert
   alertBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',

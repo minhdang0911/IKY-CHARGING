@@ -1,4 +1,4 @@
-// screens/Auth/LoginScreen.tsx — SINGLE FORM, CLEAN WEB UI
+// screens/Auth/LoginScreen.jsx — FULL CODE WITH FIXED EYE ICON
 import React, { useRef, useState } from 'react';
 import {
   StyleSheet, View, Text, TouchableOpacity, Image, Animated, Platform,
@@ -72,10 +72,6 @@ export default function LoginScreen({ navigateToScreen, login }) {
               onChangeText={(v) => { setUsername(v); if (!v) setErrorText(''); }}
               label={t('usernameLabel')}
               icon="person"
-              focused={usernameFocused}
-              onFocus={onFocusU}
-              onBlur={onBlurU}
-              animValue={usernameLabelAnim}
               returnKeyType="next"
               onSubmitEditing={() => passwordRef.current?.focus()}
               autoComplete="username"
@@ -87,18 +83,22 @@ export default function LoginScreen({ navigateToScreen, login }) {
               onChangeText={(v) => { setPassword(v); if (!v) setErrorText(''); }}
               label={t('passwordLabel')}
               icon="lock"
-              focused={passwordFocused}
-              onFocus={onFocusP}
-              onBlur={onBlurP}
-              animValue={passwordLabelAnim}
               inputRef={passwordRef}
               autoComplete="password"
               secureTextEntry={!showPassword}
               returnKeyType="done"
               onSubmitEditing={() => submit({ externalLoginCallback: login })}
               rightSlot={
-                <TouchableOpacity style={{ padding: 6 }} onPress={() => setShowPassword(s => !s)}>
-                  <Icon name={showPassword ? 'visibility' : 'visibility-off'} size={18} color="#9aa0a6" />
+                <TouchableOpacity 
+                  onPress={() => setShowPassword(prev => !prev)}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  style={s.eyeButton}
+                >
+                  <Icon 
+                    name="visibility" 
+                    size={20} 
+                    color={showPassword ? '#2563eb' : '#cbd5e1'} 
+                  />
                 </TouchableOpacity>
               }
             />
@@ -111,22 +111,6 @@ export default function LoginScreen({ navigateToScreen, login }) {
                 <Icon name="translate" size={16} color="#2563eb" />
                 <Text style={s.helperText}>{t('quickLang')}: {language === 'vi' ? 'VI' : 'EN'}</Text>
               </TouchableOpacity>
-
-              {/* <TouchableOpacity
-                onPress={() => setRemember(!remember)}
-                style={s.helperBtn}
-                accessibilityRole="checkbox"
-                accessibilityState={{ checked: remember }}
-              >
-                <Icon name={remember ? 'check-box' : 'check-box-outline-blank'} size={18} color={remember ? '#2563eb' : '#94a3b8'} />
-                <Text style={s.helperText}>{t('rememberMe') ?? 'Ghi nhớ'}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity onPress={() => navigateToScreen?.('ForgotPassword')} style={s.helperBtn}>
-                <Text style={[s.helperText, { textDecorationLine: 'underline', color: '#64748b' }]}>
-                  {t('forgotPassword') ?? 'Quên mật khẩu?'}
-                </Text>
-              </TouchableOpacity> */}
             </View>
 
             <TouchableOpacity
@@ -137,11 +121,6 @@ export default function LoginScreen({ navigateToScreen, login }) {
             >
               {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.loginText}>{t('login')}</Text>}
             </TouchableOpacity>
-
-            {/* <View style={s.footerRow}>
-              <Text style={s.support}>{t('support')}: 0902 806 999</Text>
-              <Text style={s.version}>{t('version')}: 1.125 Release</Text>
-            </View> */}
           </Animated.View>
         </Wrapper>
       </ScrollView>
@@ -161,35 +140,65 @@ const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8fafc' },
   bgTop: {
     position: 'absolute', top: 0, left: 0, right: 0, height: 160,
-   
   },
-center: {
-  flexGrow: 1,
-  alignItems: 'center',
-  justifyContent: 'center', // 🟢 căn giữa dọc luôn
-  minHeight: '100vh',       // 🟢 quan trọng: để web chiếm đủ chiều cao viewport
-  padding: 16,
-},
+  center: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: '100vh',
+    padding: 16,
+  },
 
-  // SINGLE CARD
   card: {
     width: '100%',
     maxWidth: 460,
     backgroundColor: '#fff',
     borderRadius: 16,
     padding: 20,
-    borderWidth: 1, borderColor: '#e2e8f0',
-    shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 16, shadowOffset: { width: 0, height: 8 },
+    borderWidth: 1, 
+    borderColor: '#e2e8f0',
+    shadowColor: '#000', 
+    shadowOpacity: 0.08, 
+    shadowRadius: 16, 
+    shadowOffset: { width: 0, height: 8 },
   },
 
-  brandWrap: { flexDirection: 'row', alignItems: 'center', alignSelf: 'center', marginBottom: 6, gap: 8 },
+  brandWrap: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    alignSelf: 'center', 
+    marginBottom: 6, 
+    gap: 8 
+  },
   logo: { width: 44, height: 44 },
-  brandText: { fontSize: 16, fontWeight: '800', letterSpacing: 1, color: '#1f2937' },
+  brandText: { 
+    fontSize: 16, 
+    fontWeight: '800', 
+    letterSpacing: 1, 
+    color: '#1f2937' 
+  },
 
-  title: { fontSize: 24, fontWeight: '800', color: '#0f172a', textAlign: 'center', marginTop: 6 },
-  subtitle: { fontSize: 13, color: '#64748b', textAlign: 'center', marginBottom: 12 },
+  title: { 
+    fontSize: 24, 
+    fontWeight: '800', 
+    color: '#0f172a', 
+    textAlign: 'center', 
+    marginTop: 6 
+  },
+  subtitle: { 
+    fontSize: 13, 
+    color: '#64748b', 
+    textAlign: 'center', 
+    marginBottom: 12 
+  },
 
-  errorText: { color: '#d93025', fontSize: 12, marginTop: -2, marginBottom: 6, textAlign: 'right' },
+  errorText: { 
+    color: '#d93025', 
+    fontSize: 12, 
+    marginTop: -2, 
+    marginBottom: 6, 
+    textAlign: 'right' 
+  },
 
   helpers: {
     marginTop: 8,
@@ -199,13 +208,36 @@ center: {
     justifyContent: 'space-between',
     gap: 8
   },
-  helperBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 },
-  helperText: { fontSize: 13, color: '#334155', fontWeight: '600' },
+  helperBtn: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 6, 
+    paddingVertical: 4 
+  },
+  helperText: { 
+    fontSize: 13, 
+    color: '#334155', 
+    fontWeight: '600' 
+  },
 
-  loginButton: { marginTop: 10, backgroundColor: '#2563eb', borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
-  loginText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  loginButton: { 
+    marginTop: 10, 
+    backgroundColor: '#2563eb', 
+    borderRadius: 12, 
+    paddingVertical: 12, 
+    alignItems: 'center' 
+  },
+  loginText: { 
+    color: '#fff', 
+    fontSize: 16, 
+    fontWeight: '800' 
+  },
 
-  footerRow: { marginTop: 12, flexDirection: 'row', justifyContent: 'space-between' },
-  support: { color: '#0ea5e9', fontSize: 12.5, fontWeight: '700' },
-  version: { color: '#94a3b8', fontSize: 12 },
+  eyeButton: {
+    padding: 0,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });
