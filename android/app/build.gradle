@@ -18,7 +18,7 @@ plugins {
     id "com.facebook.react"
     // id "com.google.gms.google-services" // nếu dùng FCM hãy bật lại
 }
-
+  
 react { /* giữ mặc định */ }
 
 // 💡 Nếu không cần 32-bit, bỏ hẳn cho nhẹ & tránh .so cũ

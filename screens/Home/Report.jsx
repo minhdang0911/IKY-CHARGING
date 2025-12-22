@@ -1,8 +1,15 @@
 // screens/Reports/SessionReportScreen.jsx
 import React, { useMemo, useRef, useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Image, Platform,
-  ScrollView, ActivityIndicator, Alert
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  Platform,
+  ScrollView,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import DocumentPicker from 'react-native-document-picker';
@@ -28,6 +35,10 @@ import PaginationControls from '../../components/PaginationControls';
 // ==== Keys ====
 const K_REPORT_TEMPLATE = 'report_template_b64';
 const K_ACCESS_TOKEN = 'access_token';
+
+// ==== Android assets template ====
+const DEFAULT_TEMPLATE_ASSET = 'session_report_template.xlsx';
+const DEFAULT_TEMPLATE_FILENAME = 'Báo cáo chi tiết hoạt động.xlsx';
 
 // ===================== Custom Alert (queued) =====================
 function useAlertQueue() {
@@ -106,6 +117,7 @@ const humanDate = (d) => {
   const yy = d.getFullYear();
   return `${dd}/${mm}/${yy}`;
 };
+
 const writeDateHeader = (sheet, fromDate, toDate) => {
   const text = `Từ ${humanDate(fromDate)} đến ${humanDate(toDate)}`;
   const MAX_R = 10, MAX_C = 12;
@@ -142,8 +154,8 @@ const toUtcDayRange = (dFrom, dTo) => {
 
 function isoDate(d) {
   const y = d.getFullYear();
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const dd = String(d.getDate()).padStart(2,'0');
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${dd}`;
 }
 function humanDT(s) {
@@ -151,17 +163,20 @@ function humanDT(s) {
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return '';
   const y = d.getFullYear();
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const dd = String(d.getDate()).padStart(2,'0');
-  const hh = String(d.getHours()).padStart(2,'0');
-  const mm = String(d.getMinutes()).padStart(2,'0');
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
   return `${dd}/${m}/${y} ${hh}:${mm}`;
 }
 function safeStr(v) { return (v ?? '') + ''; }
-function safeNum(v) { return typeof v === 'number' ? v.toFixed(3) : ''; }
-function startOfDay(d){ const x=new Date(d); x.setHours(0,0,0,0); return x; }
-function endOfDay(d){ const x=new Date(d); x.setHours(23,59,59,999); return x; }
-function dateSlug(d){ if(!d) return 'unknown'; return isoDate(d); }
+function safeNum(v) {
+  if (typeof v === 'number') return v.toFixed(3);
+  if (v === null || v === undefined || v === '') return '';
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(3) : '';
+}
+function dateSlug(d) { return d ? isoDate(d) : 'unknown'; }
 
 // === make output path & share ===
 const makeOutputPath = (name) => {
@@ -182,7 +197,7 @@ async function saveAndShareBase64({ base64, filename }) {
   return outPath;
 }
 
-function autoFitCols(ws, aoa){
+function autoFitCols(ws, aoa) {
   const colCount = Math.max(...aoa.map(r => r.length));
   const colWidths = new Array(colCount).fill(10);
   aoa.forEach(row => row.forEach((cell, idx) => {
@@ -190,6 +205,78 @@ function autoFitCols(ws, aoa){
     if (len + 2 > colWidths[idx]) colWidths[idx] = len + 2;
   }));
   ws['!cols'] = colWidths.map(w => ({ wch: Math.min(w, 40) }));
+}
+
+// ===================== Android: copy template from assets -> Download + Share =====================
+async function exportAndroidAssetToDownloads({ assetName, filename }) {
+  if (Platform.OS !== 'android') {
+    throw new Error('Chỉ hỗ trợ Android cho tính năng này.');
+  }
+
+  console.log('[tpl] assetName =', assetName);
+  console.log('[tpl] DownloadDirectoryPath =', RNFS.DownloadDirectoryPath);
+
+  // 1) list assets (Android) -> xem có thấy file không
+  try {
+    const assets = await RNFS.readDirAssets('');
+    console.log('[tpl] assets root:', assets.map(x => x.name));
+  } catch (e) {
+    console.log('[tpl] readDirAssets err:', e);
+  }
+
+  // 2) thử read asset
+  let base64;
+  try {
+    base64 = await RNFS.readFileAssets(assetName, 'base64');
+    console.log('[tpl] readFileAssets OK, b64 len =', base64?.length);
+  } catch (e) {
+    console.log('[tpl] readFileAssets FAIL:', e);
+    throw e;
+  }
+
+  const outPath = `${RNFS.DownloadDirectoryPath}/${filename}`;
+  console.log('[tpl] outPath =', outPath);
+
+  // 3) ghi file
+  try {
+    await RNFS.writeFile(outPath, base64, 'base64');
+    console.log('[tpl] writeFile OK');
+  } catch (e) {
+    console.log('[tpl] writeFile FAIL:', e);
+    throw e;
+  }
+
+  // 4) confirm tồn tại
+  try {
+    const ex = await RNFS.exists(outPath);
+    console.log('[tpl] exists after write =', ex);
+  } catch (e) {
+    console.log('[tpl] exists check err:', e);
+  }
+
+  // 5) share
+  try {
+    await Share.open({
+      url: 'file://' + outPath,
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      failOnCancel: false,
+    });
+  } catch (e) {
+    console.log('[tpl] share err:', e);
+  }
+
+  return outPath;
+}
+
+
+async function getDefaultTemplateB64FromAndroidAssets() {
+  if (Platform.OS !== 'android') return null;
+  try {
+    const b64 = await RNFS.readFileAssets(DEFAULT_TEMPLATE_ASSET, 'base64');
+    return b64;
+  } catch (e) {
+    return null;
+  }
 }
 
 // ===================== Main Screen =====================
@@ -262,6 +349,23 @@ export default function SessionReportScreen() {
   }, [page, from, to]);
 
   // === header actions ===
+
+  // 1) Tải mẫu template (Android assets -> Download)
+  const onDownloadTemplateMobile = useCallback(async () => {
+    try {
+      const outPath = await exportAndroidAssetToDownloads({
+        assetName: DEFAULT_TEMPLATE_ASSET,
+        filename: DEFAULT_TEMPLATE_FILENAME,
+      });
+      alert.show('success', `Đã tải template: ${outPath}`, 2200);
+    } catch (e) {
+      console.log('[download template] err', e);
+      Alert.alert('Lỗi', e?.message ? String(e.message) : 'Không tải được template');
+      alert.show('error', 'Không tải được template.', 2500);
+    }
+  }, [alert]);
+
+  // 2) Import template (user chọn file -> lưu base64 vào AsyncStorage)
   const onImportTemplate = useCallback(async () => {
     try {
       const f = await DocumentPicker.pickSingle({
@@ -287,20 +391,6 @@ export default function SessionReportScreen() {
       }
     }
   }, []);
-
-  // build sheet DATA (cho export không template)
-  const buildSheetAOA = useMemo(() => {
-    const header = ['Cổng', 'Mã đơn', 'Bắt đầu', 'Kết thúc', 'Trạng thái', 'kWh'];
-    const body = rows.map(r => [
-      r.port ?? '',
-      r.order ?? '',
-      humanDT(r.start),
-      humanDT(r.end),
-      r.status ?? '',
-      typeof r.kwh === 'number' ? r.kwh : (Number(r.kwh) || 0)
-    ]);
-    return [header, ...body];
-  }, [rows]);
 
   // === Export: KHÔNG TEMPLATE (fetch 1000, save+share RNFS)
   const onExportNoTemplate = useCallback(async () => {
@@ -357,17 +447,28 @@ export default function SessionReportScreen() {
     }
   }, [from, to]);
 
-  // === Export: DÙNG TEMPLATE (fetch 1000, fill, save+share RNFS)
+  // === Export: DÙNG TEMPLATE
+  // - ưu tiên template đã Import trong AsyncStorage
+  // - nếu chưa import => tự dùng template mặc định trong Android assets
   const onExportWithTemplate = useCallback(async () => {
     try {
       if (!from || !to) {
         alert.show('info', 'Chọn khoảng ngày trước khi xuất.', 2200);
         return;
       }
-      const tpl = await AsyncStorage.getItem(K_REPORT_TEMPLATE);
+
+      let tpl = await AsyncStorage.getItem(K_REPORT_TEMPLATE);
+
+      // fallback: lấy template mặc định trong android assets
       if (!tpl) {
-        alert.show('info', 'Chưa có template. Bấm "Import template" trước.', 2600);
-        return;
+        const fallback = await getDefaultTemplateB64FromAndroidAssets();
+        if (!fallback) {
+          alert.show('error', 'Không tìm thấy template mặc định trong Android assets.', 3000);
+          Alert.alert('Thiếu template', 'Hãy đặt file template vào android/app/src/main/assets/session_report_template.xlsx');
+          return;
+        }
+        tpl = fallback;
+        alert.show('info', 'Chưa import template — đang dùng template mặc định.', 2500);
       }
 
       const accessToken = await AsyncStorage.getItem(K_ACCESS_TOKEN);
@@ -403,6 +504,8 @@ export default function SessionReportScreen() {
 
         const p = d.ports.get(port);
         p.totalKwh += Number(s.energy_used_kwh || s.kwh || 0);
+
+        // nếu API sessions không có amount thì cột doanh thu sẽ 0 (giữ nguyên logic của mobile bạn)
         p.totalRevenue += Number(s.amount_vnd ?? s.total_price_vnd ?? s.price_vnd ?? 0);
       }
       for (const d of deviceMap.values()) {
@@ -491,11 +594,16 @@ export default function SessionReportScreen() {
 
   return (
     <View style={st.container}>
+      {alert.node}
+
       <View style={st.header}>
         <Text style={st.hTitle}>Báo cáo phiên sạc</Text>
       </View>
 
       <View style={st.hActions}>
+        {/* ✅ Nút tải template từ Android assets ra Download */}
+        <HeaderBtn icon={icExportRaw} label="Tải mẫu template" onPress={onDownloadTemplateMobile} />
+
         <HeaderBtn icon={icImport} label="Import template" onPress={onImportTemplate} />
         <HeaderBtn icon={icExport} label="Xuất dùng template" onPress={onExportWithTemplate} />
         <HeaderBtn icon={icExportRaw} label="Xuất không template" onPress={onExportNoTemplate} />
@@ -518,10 +626,10 @@ export default function SessionReportScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* ====== TABLE MỚI: cuộn ngang + compact ====== */}
+      {/* ====== TABLE: cuộn ngang + compact ====== */}
       <DataTable rows={rows} loading={loading} />
 
-      <View style={{ marginTop: 8 }}>
+      <View style={{ marginTop: 8, paddingHorizontal: 12, paddingBottom: 12 }}>
         <PaginationControls
           page={page}
           totalPages={totalPages}
@@ -532,23 +640,20 @@ export default function SessionReportScreen() {
         />
       </View>
 
-     {pickField && (
-  <DateTimePicker
-    value={pickField === 'from' ? (from || new Date()) : (to || new Date())}
-    mode="date"
-    display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-    onChange={(event, selectedDate) => {
-      setPickField(null); // Đóng picker
-      if (event.type === 'set' && selectedDate) {
-        if (pickField === 'from') {
-          setFrom(selectedDate);
-        } else {
-          setTo(selectedDate);
-        }
-      }
-    }}
-  />
-)}
+      {pickField && (
+        <DateTimePicker
+          value={pickField === 'from' ? (from || new Date()) : (to || new Date())}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={(event, selectedDate) => {
+            setPickField(null);
+            if (event.type === 'set' && selectedDate) {
+              if (pickField === 'from') setFrom(selectedDate);
+              else setTo(selectedDate);
+            }
+          }}
+        />
+      )}
     </View>
   );
 }
@@ -556,13 +661,17 @@ export default function SessionReportScreen() {
 // ===================== UI bits =====================
 function HeaderBtn({ icon, label, onPress, disabled }) {
   return (
-    <TouchableOpacity style={[st.hBtn, disabled && {opacity:0.5}]}
-      onPress={disabled ? undefined : onPress} disabled={!!disabled}>
+    <TouchableOpacity
+      style={[st.hBtn, disabled && { opacity: 0.5 }]}
+      onPress={disabled ? undefined : onPress}
+      disabled={!!disabled}
+    >
       {!!icon && <Image source={icon} style={st.hIcon} />}
       <Text style={st.hBtnTxt}>{label}</Text>
     </TouchableOpacity>
   );
 }
+
 function RangeButton({ title, value, onPress }) {
   return (
     <TouchableOpacity style={st.rangeBtn} onPress={onPress}>
@@ -575,12 +684,12 @@ function RangeButton({ title, value, onPress }) {
 
 /* ---------- DataTable (compact + horizontal scroll) ---------- */
 const COLS = [
-  { key: 'port',   label: 'Cổng',       width: 72,  align: 'left'  },
-  { key: 'order',  label: 'Mã đơn',     width: 160, align: 'left'  },
-  { key: 'start',  label: 'Bắt đầu',    width: 160, align: 'left'  },
-  { key: 'end',    label: 'Kết thúc',   width: 160, align: 'left'  },
-  { key: 'status', label: 'Trạng thái', width: 120, align: 'left'  },
-  { key: 'kwh',    label: 'kWh',        width: 90,  align: 'right' },
+  { key: 'port', label: 'Cổng', width: 72, align: 'left' },
+  { key: 'order', label: 'Mã đơn', width: 160, align: 'left' },
+  { key: 'start', label: 'Bắt đầu', width: 160, align: 'left' },
+  { key: 'end', label: 'Kết thúc', width: 160, align: 'left' },
+  { key: 'status', label: 'Trạng thái', width: 120, align: 'left' },
+  { key: 'kwh', label: 'kWh', width: 90, align: 'right' },
 ];
 
 function StatusChip({ value }) {
@@ -610,7 +719,7 @@ function DataTable({ rows, loading }) {
         <View style={{ flex: 1, minWidth: tableWidth }}>
           {/* Header */}
           <View style={dtStyles.headRow}>
-            {COLS.map((c, i) => (
+            {COLS.map((c) => (
               <View key={c.key} style={[dtStyles.cell, { minWidth: c.width, maxWidth: c.width }]}>
                 <Text
                   style={[
@@ -680,88 +789,101 @@ const MUTED = '#475569';
 
 const st = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG, paddingTop: Platform.OS === 'android' ? 0 : 10 },
+
   header: {
     width: '100%',
-    backgroundColor:'#1e88e5',
+    backgroundColor: '#1e88e5',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: BORDER,
     paddingHorizontal: 12,
     paddingTop: 12,
     paddingBottom: 10
   },
-  hTitle: { fontSize: 18, fontWeight: '800', color: '#fff', marginBottom: 10 },
-  hActions: { flexDirection:'row', flexWrap:'wrap', gap:8, paddingHorizontal:12, paddingVertical:10, backgroundColor: CARD, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER },
+  hTitle: { fontSize: 18, fontWeight: '800', color: '#fff' },
+
+  hActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: CARD,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: BORDER
+  },
   hBtn: {
     height: 38, paddingHorizontal: 12, borderRadius: 10,
-    backgroundColor: '#EEF2FF', flexDirection:'row', alignItems:'center', gap:6
+    backgroundColor: '#EEF2FF', flexDirection: 'row', alignItems: 'center', gap: 6
   },
   hIcon: { width: 16, height: 16, tintColor: PRIMARY },
   hBtnTxt: { color: PRIMARY, fontWeight: '800', fontSize: 13 },
 
   rangeRow: {
-    flexDirection:'row', alignItems:'center', gap:8,
-    paddingHorizontal:12, paddingVertical:10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER, backgroundColor: CARD
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 12, paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: BORDER,
+    backgroundColor: CARD
   },
   rangeBtn: {
-    flex:1, height:42, borderWidth:1, borderColor:BORDER, borderRadius:10,
-    backgroundColor:'#fff', paddingHorizontal:12,
-    flexDirection:'row', alignItems:'center', justifyContent:'space-between'
+    flex: 1, height: 42, borderWidth: 1, borderColor: BORDER, borderRadius: 10,
+    backgroundColor: '#fff', paddingHorizontal: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'
   },
-  calIcon: { width:18, height:18, tintColor:MUTED },
-  rangeTitle: { fontSize:12, fontWeight:'700', color:MUTED },
-  rangeValue: { fontSize:13, fontWeight:'800', color:TEXT, textAlign:'right' },
+  calIcon: { width: 18, height: 18, tintColor: MUTED },
+  rangeTitle: { fontSize: 12, fontWeight: '700', color: MUTED },
+  rangeValue: { fontSize: 13, fontWeight: '800', color: TEXT, textAlign: 'right' },
 
-  applyBtn: { height:42, paddingHorizontal:14, backgroundColor:PRIMARY, borderRadius:10, alignItems:'center', justifyContent:'center' },
-  applyTxt: { color:'#fff', fontWeight:'800' },
+  applyBtn: { height: 42, paddingHorizontal: 14, backgroundColor: PRIMARY, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  applyTxt: { color: '#fff', fontWeight: '800' },
 
   tableWrap: {
-    flex:1, marginTop:10, marginHorizontal:12, backgroundColor:CARD,
-    borderRadius:12, borderWidth:1, borderColor:BORDER, overflow:'hidden'
+    flex: 1, marginTop: 10, marginHorizontal: 12, backgroundColor: CARD,
+    borderRadius: 12, borderWidth: 1, borderColor: BORDER, overflow: 'hidden'
   },
 
-  loading: { padding:16, alignItems:'center', justifyContent:'center' },
-  empty: { padding:24, alignItems:'center', justifyContent:'center' },
-  emptyTxt: { color:MUTED, fontWeight:'700' },
+  loading: { padding: 16, alignItems: 'center', justifyContent: 'center' },
+  empty: { padding: 24, alignItems: 'center', justifyContent: 'center' },
+  emptyTxt: { color: MUTED, fontWeight: '700' },
 });
 
 const dtStyles = StyleSheet.create({
   headRow: {
-    flexDirection:'row',
-    backgroundColor:'#F1F5F9',
-    borderBottomWidth:1,
-    borderBottomColor:BORDER,
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
   },
   row: {
-    flexDirection:'row',
+    flexDirection: 'row',
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: BORDER,
-    backgroundColor:'#fff',
+    backgroundColor: '#fff',
   },
   rowAlt: { backgroundColor: '#F8FAFC' },
-  cell: { paddingVertical:10, paddingHorizontal:12, justifyContent:'center' },
-  headTxt: { fontSize:12, fontWeight:'800', color:'#334155' },
-  cellTxt: { fontSize:12, color:'#0f172a' },
+  cell: { paddingVertical: 10, paddingHorizontal: 12, justifyContent: 'center' },
+  headTxt: { fontSize: 12, fontWeight: '800', color: '#334155' },
+  cellTxt: { fontSize: 12, color: '#0f172a' },
 
   chip: {
-    paddingHorizontal:8,
-    paddingVertical:4,
-    borderRadius:999,
-    alignSelf:'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    alignSelf: 'flex-start',
   },
-  chipTxt: { fontSize:11, fontWeight:'800' },
+  chipTxt: { fontSize: 11, fontWeight: '800' },
 });
 
 const aStyles = StyleSheet.create({
   wrap: {
-    position:'absolute', top:12, left:12, right:12, zIndex:999,
-    paddingHorizontal:12, paddingVertical:10, borderRadius:12,
-    flexDirection:'row', alignItems:'center', gap:10,
-    shadowColor:'#000', shadowOpacity:0.15, shadowRadius:8, elevation:4
+    position: 'absolute', top: 12, left: 12, right: 12, zIndex: 999,
+    paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 8, elevation: 4
   },
-  text: { flex:1, color:'#0f172a', fontWeight:'700' },
-  closeBtn: { paddingHorizontal:6, paddingVertical:2, borderRadius:8, backgroundColor:'rgba(0,0,0,0.06)' },
-  closeTxt: { fontWeight:'900', color:'#111827' },
-  info: { backgroundColor:'#e0f2fe', borderWidth:1, borderColor:'#bae6fd' },
-  success: { backgroundColor:'#dcfce7', borderWidth:1, borderColor:'#bbf7d0' },
-  error: { backgroundColor:'#fee2e2', borderWidth:1, borderColor:'#fecaca' },
+  text: { flex: 1, color: '#0f172a', fontWeight: '700' },
+  closeBtn: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.06)' },
+  closeTxt: { fontWeight: '900', color: '#111827' },
+  info: { backgroundColor: '#e0f2fe', borderWidth: 1, borderColor: '#bae6fd' },
+  success: { backgroundColor: '#dcfce7', borderWidth: 1, borderColor: '#bbf7d0' },
+  error: { backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#fecaca' },
 });

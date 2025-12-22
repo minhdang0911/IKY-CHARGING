@@ -1,21 +1,25 @@
-// screens/Home/Extend.jsx (Notch-safe + PNG icons)
+// screens/Home/Extend.jsx (Notch-safe + PNG icons) — VietQR ON, VNPay hidden + Frame QR + Countdown + View Again cache
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, FlatList, KeyboardAvoidingView,
   Platform, TextInput, Linking, ActivityIndicator, Modal, BackHandler, PanResponder,
-  Image, Animated, Easing, StatusBar
+  Image, Animated, Easing, StatusBar, useWindowDimensions, ScrollView
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import QRCode from 'react-native-qrcode-svg';
+import QRCodeLib from 'qrcode';
+
 import { getPublicPricingPlans, createOrder, createOrderCash } from '../../apis/payment';
 import { getDevices } from '../../apis/devices';
 
-// logos (payment methods - you already have these in project; keep paths)
+// logos (payment methods)
+import vietQRlogo from '../../assets/img/unnamed.png'; // ✅ chỉnh đúng path của bạn
 import momologo from '../../assets/img/momo.png';
-import vnpaylogo from '../../assets/img/vnpay.jpg';
+// import vnpaylogo from '../../assets/img/vnpay.jpg'; // ❌ tạm ẩn VNPay
 import cashlogo from '../../assets/img/cash.png';
 
-// local PNG icons (replace MaterialIcons)
+// local PNG icons
 import icBack from '../../assets/img/ic_back.png';
 import icRefresh from '../../assets/img/ic_refresh.png';
 import icError from '../../assets/img/ic_error.png';
@@ -25,6 +29,9 @@ import icCancel from '../../assets/img/ic_cancel.png';
 import icCheck from '../../assets/img/ic_check.png';
 import icOpen from '../../assets/img/ic_open.png';
 import icPayments from '../../assets/img/ic_payments.png';
+
+// VietQR frame template
+import vietQrFrame from '../../assets/img/template.png';
 
 /* ================= THEME ================= */
 const UI = {
@@ -38,6 +45,21 @@ const UI = {
 };
 
 const IDLE_STATES = ['idle', 'available', 'free', 'ready'];
+
+/**
+ * Frame template.png gốc 850x1100
+ * Vùng QR: left=160, top=239, width=528, height=526
+ */
+const FRAME_BOX = {
+  leftPct: 160 / 850,
+  topPct: 239 / 1100,
+  widthPct: 528 / 850,
+  heightPct: 526 / 1100,
+  padding: 8,
+};
+
+const QR_TTL_MS = 30 * 60 * 1000;
+const QR_CACHE_KEY = 'vietqr_cache_v1';
 
 /* ================= Small utils ================= */
 const onlyMessage = (err) => {
@@ -53,6 +75,31 @@ const onlyMessage = (err) => {
   } catch {
     return 'Có lỗi xảy ra, thử lại sau.';
   }
+};
+
+const parseExpDate = (expDateStr) => {
+  if (!expDateStr) return null;
+  const s = String(expDateStr);
+  if (s.length < 10) return null;
+  const yy = Number(s.slice(0, 2));
+  const MM = Number(s.slice(2, 4));
+  const dd = Number(s.slice(4, 6));
+  const HH = Number(s.slice(6, 8));
+  const mm = Number(s.slice(8, 10));
+  if (![yy, MM, dd, HH, mm].every((n) => Number.isFinite(n))) return null;
+  return new Date(2000 + yy, MM - 1, dd, HH, mm, 0);
+};
+
+const pad2 = (n) => String(n).padStart(2, '0');
+const fmtDateTimeVN = (d) => {
+  if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())} ${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+};
+const msToMMSS = (ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${pad2(m)}:${pad2(r)}`;
 };
 
 /* ============== Custom Alert ============== */
@@ -89,6 +136,7 @@ const CustomSelect = ({
   disabled = false,
   renderValue,
   renderOption,
+  rightIcon, // ✅ cho phép custom icon ở bên phải
 }) => {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -113,7 +161,7 @@ const CustomSelect = ({
             ? (renderValue ? renderValue(value) : <Text style={styles.selectText}>{getLabel(value)}</Text>)
             : <Text style={[styles.selectText, { color: UI.sub }]}>{placeholder}</Text>}
         </View>
-        <Image source={icPayments} style={{ width: 20, height: 20, tintColor: UI.sub }} />
+        <Image source={rightIcon || icPayments} style={{ width: 20, height: 20, tintColor: UI.sub }} />
       </TouchableOpacity>
 
       {/* CENTERED DIALOG */}
@@ -154,28 +202,28 @@ const CustomSelect = ({
                 keyboardShouldPersistTaps="handled"
                 ItemSeparatorComponent={() => <View style={styles.separator} />}
                 renderItem={({ item }) => {
-  const isOn = keyExtractor(item) === keyExtractor(value || {});
-  return (
-    <TouchableOpacity
-      activeOpacity={0.9}
-      style={[styles.optionItem, isOn && { backgroundColor: '#F0F6FF' }]}
-      onPress={() => { onChange?.(item); setOpen(false); }}
-    >
-      {renderOption ? (
-        renderOption(item, isOn)
-      ) : (
-        <>
-          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-            <Text style={[styles.optionText, isOn && { color: UI.accent, fontWeight: '700' }]}>
-              {getLabel(item)}
-            </Text>
-          </View>
-          {isOn && <Image source={icCheck} style={{ width: 18, height: 18, tintColor: UI.accent }} />}
-        </>
-      )}
-    </TouchableOpacity>
-  );
-}}
+                  const isOn = keyExtractor(item) === keyExtractor(value || {});
+                  return (
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      style={[styles.optionItem, isOn && { backgroundColor: '#F0F6FF' }]}
+                      onPress={() => { onChange?.(item); setOpen(false); }}
+                    >
+                      {renderOption ? (
+                        renderOption(item, isOn)
+                      ) : (
+                        <>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                            <Text style={[styles.optionText, isOn && { color: UI.accent, fontWeight: '700' }]}>
+                              {getLabel(item)}
+                            </Text>
+                          </View>
+                          {isOn && <Image source={icCheck} style={{ width: 18, height: 18, tintColor: UI.accent }} />}
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  );
+                }}
                 style={{ maxHeight: 420 }}
                 ListEmptyComponent={
                   <View style={{ padding: 16, alignItems: 'center' }}>
@@ -193,6 +241,8 @@ const CustomSelect = ({
 
 /* ================= MAIN ================= */
 export default function Extend({ navigateToScreen, screenData }) {
+  const { width: winW } = useWindowDimensions();
+
   // notch-safe
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === 'ios' ? insets.top : (StatusBar.currentHeight || 0);
@@ -217,6 +267,21 @@ export default function Extend({ navigateToScreen, screenData }) {
   const [showAlert, setShowAlert] = useState(false);
   const [alertMsg, setAlertMsg] = useState('');
 
+  // ===== VietQR Frame overlay measure =====
+  const qrRef = useRef(null);
+  const [frameLayout, setFrameLayout] = useState({ w: 0, h: 0 });
+
+  // ===== VietQR cache "xem lại" =====
+  const [cachedVietQrOrder, setCachedVietQrOrder] = useState(null);
+
+  // countdown tick
+  const [nowTick, setNowTick] = useState(Date.now());
+  useEffect(() => {
+    if (!orderSuccess || orderSuccess.method !== 'vietQR' || orderSuccess.isViewAgain) return;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [orderSuccess]);
+
   const navigatingRef = useRef(false);
 
   const successPulse = useRef(new Animated.Value(1)).current;
@@ -231,15 +296,36 @@ export default function Extend({ navigateToScreen, screenData }) {
     return () => loop.stop();
   }, [successPulse]);
 
+  // compute QR overlay box inside frame
+  const qrBox = useMemo(() => {
+    const w = frameLayout.w || 0;
+    const h = frameLayout.h || 0;
+
+    const boxW = w * FRAME_BOX.widthPct;
+    const boxH = h * FRAME_BOX.heightPct;
+
+    const size = Math.max(0, Math.min(boxW, boxH) - FRAME_BOX.padding * 2);
+
+    const boxLeft = w * FRAME_BOX.leftPct;
+    const boxTop = h * FRAME_BOX.topPct;
+
+    const left = boxLeft + (boxW - size) / 2;
+    const top = boxTop + (boxH - size) / 2;
+
+    return { left, top, size };
+  }, [frameLayout]);
+
   const goBack = useCallback(() => {
     if (navigatingRef.current) return;
     navigatingRef.current = true;
     try {
-      navigateToScreen?.('Device');
+      // nếu đang ở success screen -> quay về form
+      if (orderSuccess) setOrderSuccess(null);
+      else navigateToScreen?.('Device');
     } finally {
       setTimeout(() => { navigatingRef.current = false; }, 300);
     }
-  }, [navigateToScreen]);
+  }, [navigateToScreen, orderSuccess]);
 
   useEffect(() => {
     const onHWBack = () => { goBack(); return true; };
@@ -271,7 +357,7 @@ export default function Extend({ navigateToScreen, screenData }) {
           if (!IDLE_STATES.includes(latestStatus)) setSelectedPort(null);
         }
       }
-    } catch {}
+    } catch { }
   }, [deviceId, device?.device_code, selectedPort]);
 
   useEffect(() => { refreshDevice(); }, [refreshDevice]);
@@ -284,11 +370,17 @@ export default function Extend({ navigateToScreen, screenData }) {
     [ports]
   );
 
+  // ✅ VietQR ON, VNPay hidden
   const paymentMethods = [
+    { id: 'vietqr', name: 'VietQR', type: 'vietQR', icon: vietQRlogo },
     { id: 'momo', name: 'MoMo', type: 'momo', icon: momologo },
-    { id: 'vnpay', name: 'VNPay', type: 'vnpay', icon: vnpaylogo },
     { id: 'cash', name: 'Tiền mặt', type: 'cash', icon: cashlogo },
   ];
+
+  // ✅ nếu đâu đó còn set vnpay thì reset
+  useEffect(() => {
+    if (selectedPayment?.type === 'vnpay') setSelectedPayment(null);
+  }, [selectedPayment]);
 
   /* ===== Load pricing plans ===== */
   const fetchPlans = useCallback(async () => {
@@ -324,6 +416,103 @@ export default function Extend({ navigateToScreen, screenData }) {
     }
   }, [deviceId, device?.device_code]);
 
+  /* ===== Cache helpers ===== */
+  const makeCacheKey = useCallback(() => {
+    const deviceKey = device?._id || device?.device_code || '';
+    const planKey = selectedPlan?.id || '';
+    const portKey = selectedPort?.portNumber != null ? String(selectedPort.portNumber) : '';
+    return `${deviceKey}|${planKey}|${portKey}`;
+  }, [device, selectedPlan, selectedPort]);
+
+  const loadCachedVietQr = useCallback(async () => {
+    try {
+      const key = makeCacheKey();
+      if (!key || !selectedPayment || selectedPayment?.type !== 'vietQR') {
+        setCachedVietQrOrder(null);
+        return;
+      }
+
+      const raw = await AsyncStorage.getItem(QR_CACHE_KEY);
+      const obj = raw ? JSON.parse(raw) : {};
+      const hit = obj?.[key] || null;
+      if (!hit) {
+        setCachedVietQrOrder(null);
+        return;
+      }
+
+      const expFromExpDate = parseExpDate(hit.expDate);
+      const expMs = expFromExpDate?.getTime?.() || (Number(hit.createdAt || 0) + QR_TTL_MS);
+      const ok = Date.now() < expMs;
+
+      setCachedVietQrOrder(ok ? hit : null);
+
+      if (!ok) {
+        const next = { ...(obj || {}) };
+        delete next[key];
+        await AsyncStorage.setItem(QR_CACHE_KEY, JSON.stringify(next));
+      }
+    } catch {
+      setCachedVietQrOrder(null);
+    }
+  }, [makeCacheKey, selectedPayment]);
+
+  useEffect(() => { loadCachedVietQr(); }, [loadCachedVietQr]);
+
+  const saveCachedVietQr = useCallback(async (payload) => {
+    try {
+      const key = `${payload.deviceId || ''}|${payload.planId || ''}|${String(payload.portNumber ?? '')}`;
+      const raw = await AsyncStorage.getItem(QR_CACHE_KEY);
+      const obj = raw ? JSON.parse(raw) : {};
+      obj[key] = payload;
+      await AsyncStorage.setItem(QR_CACHE_KEY, JSON.stringify(obj));
+    } catch { }
+  }, []);
+
+  /* ===== Download QR (web) / export QR-only (native) ===== */
+  const downloadQrImage = useCallback(async () => {
+    try {
+      if (!orderSuccess?.qrData) {
+        setAlertMsg('Thiếu dữ liệu QR để xuất ảnh.');
+        setShowAlert(true);
+        return;
+      }
+
+      if (Platform.OS === 'web') {
+        const dataUrl = await QRCodeLib.toDataURL(orderSuccess.qrData, {
+          width: 900,
+          margin: 1,
+          errorCorrectionLevel: 'M',
+          type: 'image/png',
+        });
+
+        const a = document.createElement('a');
+        a.href = dataUrl;
+        a.download = `vietqr_${orderSuccess?.orderId || 'order'}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        return;
+      }
+
+      if (!qrRef.current?.toDataURL) {
+        setAlertMsg('Không thể export QR lúc này.');
+        setShowAlert(true);
+        return;
+      }
+
+      qrRef.current.toDataURL((data) => {
+        const uri = `data:image/png;base64,${data}`;
+        Linking.openURL(uri).catch(() => {
+          setAlertMsg('Thiết bị không hỗ trợ tải trực tiếp. Cần tích hợp thư viện lưu ảnh.');
+          setShowAlert(true);
+        });
+      });
+    } catch (e) {
+      setAlertMsg(e?.message || 'Tải ảnh thất bại.');
+      setShowAlert(true);
+    }
+  }, [orderSuccess]);
+
   /* ===== Create Order ===== */
   const handleCreateOrder = useCallback(async () => {
     if (!selectedPlan || !selectedPort || !selectedPayment) {
@@ -352,20 +541,21 @@ export default function Extend({ navigateToScreen, screenData }) {
         ...(phone ? { phone } : {}),
       };
 
-      const method = selectedPayment.type;
+      const method = selectedPayment.type; // momo | vietQR | cash
       const payload = { ...basePayload, payment_method: method };
-      const api = method === 'momo' ? createOrder : createOrderCash;
 
+      const api = method === 'cash' ? createOrderCash : createOrder;
       const res = await api(token, payload);
 
-      const orderId    = res?.orderId    ?? res?.order_id   ?? null;
-      const paymentUrl = res?.paymentUrl ?? res?.data       ?? null;
-      const amount     = res?.amount     ?? selectedPlan?.raw?.price
-                                      ?? selectedPlan?.price ?? 0;
+      const orderId = res?.orderId ?? res?.order_id ?? null;
+      const paymentUrl = res?.paymentUrl ?? (method === 'momo' ? res?.data : null);
+      const qrData = method === 'vietQR' ? (res?.data ?? res?.qrData ?? null) : null;
+      const amount = res?.amount ?? selectedPlan?.raw?.price ?? selectedPlan?.price ?? 0;
 
-      setOrderSuccess({
+      const next = {
         orderId,
         paymentUrl,
+        qrData,
         method,
         planName: selectedPlan?.raw?.name ?? selectedPlan?.name,
         amount,
@@ -373,27 +563,193 @@ export default function Extend({ navigateToScreen, screenData }) {
         deviceName: device?.name || '',
         deviceCode: device?.device_code || '',
         expDate: res?.expDate || null,
-        createdAt: res?.createdAt || null,
-      });
+        createdAt: res?.createdAt || Date.now(),
+        isViewAgain: false,
+      };
+
+      setOrderSuccess(next);
+
+      // cache for "xem lại"
+      if (method === 'vietQR') {
+        await saveCachedVietQr({
+          deviceId: device?._id || device?.device_code || '',
+          planId: selectedPlan?.id || '',
+          portNumber: selectedPort?.portNumber,
+          orderId: next.orderId,
+          qrData: next.qrData,
+          expDate: next.expDate,
+          createdAt: next.createdAt,
+        });
+        await loadCachedVietQr();
+      }
     } catch (err) {
       setAlertMsg(onlyMessage(err));
       setShowAlert(true);
     } finally {
       setCreating(false);
     }
-  }, [selectedPlan, selectedPort, selectedPayment, phone, device, ensurePortStillIdle, refreshDevice]);
+  }, [
+    selectedPlan, selectedPort, selectedPayment, phone,
+    device, ensurePortStillIdle, refreshDevice,
+    saveCachedVietQr, loadCachedVietQr
+  ]);
 
-  /* ===== Success Screen ===== */
+  /* =================== SUCCESS SCREEN =================== */
   if (orderSuccess) {
+    // VietQR: show frame overlay + countdown + view-again minimal
+    if (orderSuccess.method === 'vietQR') {
+      const frameW = Math.min(520, Math.max(300, winW * 0.82));
+      const rawH = frameW * (1100 / 850);
+      const frameH = Math.min(rawH, 460);
+
+      const expDt = parseExpDate(orderSuccess.expDate);
+      const expMs = expDt?.getTime?.() || (Number(orderSuccess.createdAt || 0) + QR_TTL_MS);
+      const remainMs = expMs - nowTick;
+      const expired = remainMs <= 0;
+      const isViewAgain = !!orderSuccess.isViewAgain;
+
+      return (
+        <SafeAreaView style={{ flex: 1, backgroundColor: UI.bg }} edges={['top']}>
+          <View style={[styles.header, { paddingTop: 8 + topPad }]}>
+            <TouchableOpacity onPress={goBack} style={{ padding: 6 }}>
+              <Image source={icBack} style={{ width: 24, height: 24, tintColor: '#fff' }} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>VietQR</Text>
+            <TouchableOpacity onPress={refreshDevice} style={{ padding: 6 }}>
+              <Image source={icRefresh} style={{ width: 22, height: 22, tintColor: '#fff' }} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            contentContainerStyle={{ padding: 16, alignItems: 'center', paddingBottom: 30 }}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.successWrap}>
+ <View style={{ marginTop: 12, alignItems: 'center' }}>
+                <View
+                  style={[styles.vietqrFrameWrap, { width: frameW, height: frameH }]}
+                  onLayout={(e) => {
+                    const { width: w, height: h } = e.nativeEvent.layout;
+                    setFrameLayout({ w, h });
+                  }}
+                >
+                  <Image source={vietQrFrame} style={styles.vietqrFrameImg} resizeMode="contain" />
+                  <View
+                    style={[
+                      styles.vietqrQrOverlayAbs,
+                      { left: qrBox.left, top: qrBox.top, width: qrBox.size, height: qrBox.size }
+                    ]}
+                  >
+                    <QRCode
+                      value={String(orderSuccess.qrData || '')}
+                      size={Math.max(0, qrBox.size)}
+                      ecl="M"
+                      getRef={(c) => (qrRef.current = c)}
+                    />
+                  </View>
+                </View>
+ 
+                {!isViewAgain ? (
+                  <View style={{ marginTop: 10, alignItems: 'center' }}>
+                    <Text style={styles.qrNoteText}>
+                      Mã QR này sẽ hết hạn sau <Text style={{ fontWeight: '900' }}>30 phút</Text>.
+                    </Text>
+                    <Text style={styles.qrNoteText}>
+                      Hết hạn lúc:{' '}
+                      <Text style={{ fontWeight: '900' }}>{expDt ? fmtDateTimeVN(expDt) : '—'}</Text>
+                      {expired ? <Text style={{ fontWeight: '900', color: '#DC2626' }}> (đã hết hạn)</Text> : null}
+                    </Text>
+                    {!expired ? (
+                      <Text style={styles.qrCountdown}>Còn lại: {msToMMSS(remainMs)}</Text>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+
+
+             {/* ===== Order summary dưới QR (CHỈ khi vừa tạo đơn) ===== */}
+{!isViewAgain ? (
+  <View style={styles.qrOrderInfo}>
+
+        <View style={styles.qrOrderRow}>
+      <Text style={styles.qrKey}>Mã đơn hàng</Text>
+      <Text style={styles.qrVal}>{orderSuccess?.orderId}</Text>
+    </View>
+
+    <View style={styles.qrOrderRow}>
+      <Text style={styles.qrKey}>Thiết bị</Text>
+      <Text style={styles.qrVal} numberOfLines={1}>
+        {orderSuccess.deviceName || '—'}
+      </Text>
+    </View>
+
+    
+
+    <View style={styles.qrOrderRow}>
+      <Text style={styles.qrKey}>Cổng sạc</Text>
+      <Text style={styles.qrVal}>Cổng {orderSuccess.portNumber}</Text>
+    </View>
+
+    
+
+    <View style={styles.qrOrderRow}>
+      <Text style={styles.qrKey}>Gói dịch vụ</Text>
+      <Text style={styles.qrVal} numberOfLines={2}>
+        {orderSuccess.planName}
+      </Text>
+    </View>
+
+    <View style={styles.qrOrderRow}>
+      <Text style={styles.qrKey}>Số tiền</Text>
+      <Text style={[styles.qrVal, { fontWeight: '900' }]}>
+        {Number(orderSuccess.amount || 0).toLocaleString('vi-VN')}đ
+      </Text>
+    </View>
+
+    <View style={styles.qrOrderRow}>
+      <Text style={styles.qrKey}>Thanh toán</Text>
+      <Text style={[styles.qrVal, { fontWeight: '700' }]}>VietQR</Text>
+    </View>
+  </View>
+) : null}
+
+
+              {/* Frame + QR overlay */}
+             
+              {/* ===== Order summary dưới QR ===== */}
+ 
+
+
+              {/* Actions */}
+              <View style={[styles.actionRow, { marginTop: 14 }]}>
+                <TouchableOpacity style={[styles.btnGhost, { flex: 1 }]} onPress={() => setOrderSuccess(null)}>
+                  <Text style={styles.btnGhostText}>Quay lại</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.btnPrimary, { flex: 1 }, (!isViewAgain && expired) && { opacity: 0.6 }]}
+                  onPress={downloadQrImage}
+                  disabled={!isViewAgain && expired}
+                >
+                  <Image source={icOpen} style={{ width: 18, height: 18, tintColor: '#fff', marginRight: 8 }} />
+                  <Text style={styles.btnText}>Tải ảnh</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+
+          <CustomAlert visible={showAlert} message={alertMsg} onClose={() => setShowAlert(false)} />
+        </SafeAreaView>
+      );
+    }
+
+    // momo / cash giữ như bản bạn
     const payBtnLabel =
       orderSuccess.method === 'momo'
         ? 'Thanh toán MoMo'
-        : orderSuccess.method === 'vnpay'
-        ? 'Thanh toán VNPay'
         : 'Đã nhận tiền mặt';
-    const canOpen =
-      !!orderSuccess.paymentUrl &&
-      (orderSuccess.method === 'momo' || orderSuccess.method === 'vnpay');
+
+    const canOpen = (orderSuccess.method === 'momo' && !!orderSuccess.paymentUrl);
 
     return (
       <View style={[styles.container, { padding: 16, justifyContent: 'center' }]}>
@@ -406,16 +762,8 @@ export default function Extend({ navigateToScreen, screenData }) {
           <Text style={styles.successSubtitle}>
             {orderSuccess.method === 'cash'
               ? 'Đã ghi nhận thanh toán tiền mặt.'
-              : (orderSuccess.method === 'vnpay'
-                  ? 'Đơn hàng VNPay đã sẵn sàng.'
-                  : 'Đơn hàng MoMo đã tạo.')}
+              : 'Đơn hàng MoMo đã tạo.'}
           </Text>
-
-          {orderSuccess.method === 'momo' && (
-            <View style={styles.successInfoCard}>
-              <Row k="Mã đơn" v={orderSuccess.orderId || '—'} />
-            </View>
-          )}
 
           <View style={styles.successInfoCard}>
             <Row k="Thiết bị" v={orderSuccess.deviceName || '—'} />
@@ -466,125 +814,149 @@ export default function Extend({ navigateToScreen, screenData }) {
           </View>
         </View>
 
-        <CustomAlert
-          visible={showAlert}
-          message={alertMsg}
-          onClose={() => setShowAlert(false)}
-        />
+        <CustomAlert visible={showAlert} message={alertMsg} onClose={() => setShowAlert(false)} />
       </View>
     );
   }
 
   /* ===== Main Form ===== */
+  const showViewAgainBtn =
+    selectedPayment?.type === 'vietQR' &&
+    !!selectedPlan &&
+    !!selectedPort &&
+    !!cachedVietQrOrder?.qrData;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: UI.bg }} edges={['top']}>
-    <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: UI.bg }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      {...(Platform.OS === 'ios' ? panResponder.panHandlers : {})}
-    >
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: 8 + topPad }]}>
-        <TouchableOpacity onPress={goBack} style={{ padding: 6 }}>
-          <Image source={icBack} style={{ width: 24, height: 24, tintColor: '#fff' }} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Tạo đơn hàng</Text>
-        <TouchableOpacity onPress={refreshDevice} style={{ padding: 6 }}>
-          <Image source={icRefresh} style={{ width: 22, height: 22, tintColor: '#fff' }} />
-        </TouchableOpacity>
-      </View>
-
-      <View style={{ padding: 16, flex: 1 }}>
-        {/* Device — CHỈ HIỆN NAME */}
-        <View style={styles.deviceBar}>
-          <Text style={styles.deviceText} numberOfLines={1} ellipsizeMode="tail">
-            {device?.name || 'Thiết bị'}
-          </Text>
+      <KeyboardAvoidingView
+        style={{ flex: 1, backgroundColor: UI.bg }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        {...(Platform.OS === 'ios' ? panResponder.panHandlers : {})}
+      >
+        {/* Header */}
+        <View style={[styles.header, { paddingTop: 8 + topPad }]}>
+          <TouchableOpacity onPress={goBack} style={{ padding: 6 }}>
+            <Image source={icBack} style={{ width: 24, height: 24, tintColor: '#fff' }} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Tạo đơn hàng</Text>
+          <TouchableOpacity onPress={refreshDevice} style={{ padding: 6 }}>
+            <Image source={icRefresh} style={{ width: 22, height: 22, tintColor: '#fff' }} />
+          </TouchableOpacity>
         </View>
 
-        {/* Selects */}
-        <View style={{ marginTop: 12 }}>
-          <CustomSelect
-            label="Gói dịch vụ"
-            placeholder={planLoading ? 'Đang tải…' : 'Chọn gói dịch vụ'}
-            options={pricingPlans}
-            value={selectedPlan}
-            onChange={setSelectedPlan}
-            getLabel={(it) =>
-              it ? `${it.raw?.name ?? it.name} — ${Number(it.raw?.price ?? it.price).toLocaleString('vi-VN')}đ` : ''
-            }
-            keyExtractor={(it) => String(it?.id)}
-            searchable
-            disabled={planLoading}
-          />
+        {/* ✅ FIX: phải có ScrollView để không “mất” port/payment ở màn hình nhỏ */}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: 16, paddingBottom: 24 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Device — CHỈ HIỆN NAME */}
+          <View style={styles.deviceBar}>
+            <Text style={styles.deviceText} numberOfLines={1} ellipsizeMode="tail">
+              {device?.name || 'Thiết bị'}
+            </Text>
+          </View>
 
-          <CustomSelect
-            label="Cổng sạc"
-            placeholder="Chọn cổng còn trống"
-            options={idlePortOptions}
-            value={selectedPort}
-            onChange={setSelectedPort}
-            getLabel={(it) => (it ? `Cổng ${it.portNumber}` : '')}
-            keyExtractor={(it) => String(it?.id)}
-          />
+          <View style={{ marginTop: 12 }}>
+            <CustomSelect
+              label="Gói dịch vụ"
+              placeholder={planLoading ? 'Đang tải…' : 'Chọn gói dịch vụ'}
+              options={pricingPlans}
+              value={selectedPlan}
+              onChange={(p) => { setSelectedPlan(p); }}
+              getLabel={(it) =>
+                it ? `${it.raw?.name ?? it.name} — ${Number(it.raw?.price ?? it.price).toLocaleString('vi-VN')}đ` : ''
+              }
+              keyExtractor={(it) => String(it?.id)}
+              searchable
+              disabled={planLoading}
+              rightIcon={icPayments}
+            />
 
-          <CustomSelect
-            label="Phương thức thanh toán"
-            placeholder="Chọn phương thức"
-            options={['momo', 'vnpay', 'cash'].map(id => paymentMethods.find(p => p.id === id))}
-            value={selectedPayment}
-            onChange={setSelectedPayment}
-            getLabel={(it) => it?.name || ''}
-            keyExtractor={(it) => String(it?.id)}
-            searchable={false}
-            renderValue={(it) => (
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Image source={it.icon} style={{ width: 22, height: 22, borderRadius: 4, marginRight: 8 }} />
-                <Text style={styles.selectText}>{it.name}</Text>
-              </View>
-            )}
-            renderOption={(it, isOn) => (
-              <>
-                <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
-                  <Image source={it.icon} style={{ width: 26, height: 26, borderRadius: 6, marginRight: 10 }} />
-                  <Text style={[styles.optionText, isOn && { color: UI.accent, fontWeight: '700' }]}>{it.name}</Text>
+            <CustomSelect
+              label="Cổng sạc"
+              placeholder="Chọn cổng còn trống"
+              options={idlePortOptions}
+              value={selectedPort}
+              onChange={setSelectedPort}
+              getLabel={(it) => (it ? `Cổng ${it.portNumber}` : '')}
+              keyExtractor={(it) => String(it?.id)}
+              searchable={false}
+              rightIcon={icPayments}
+            />
+
+            <CustomSelect
+              label="Phương thức thanh toán"
+              placeholder="Chọn phương thức"
+              options={['vietqr', 'momo', 'cash'].map(id => paymentMethods.find(p => p.id === id)).filter(Boolean)}
+              value={selectedPayment}
+              onChange={setSelectedPayment}
+              getLabel={(it) => it?.name || ''}
+              keyExtractor={(it) => String(it?.id)}
+              searchable={false}
+              rightIcon={icPayments}
+              renderValue={(it) => (
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Image source={it.icon} style={{ width: 22, height: 22, borderRadius: 4, marginRight: 8 }} />
+                  <Text style={styles.selectText}>{it.name}</Text>
                 </View>
-                {isOn && <Image source={icCheck} style={{ width: 18, height: 18, tintColor: UI.accent }} />}
-              </>
-            )}
-          />
-
-          <View style={{ marginTop: 14 }}>
-            <TouchableOpacity
-              style={[
-                styles.btn,
-                { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-                (!selectedPlan || !selectedPort || !selectedPayment || creating) && { opacity: 0.5 },
-              ]}
-              disabled={!selectedPlan || !selectedPort || !selectedPayment || creating}
-              onPress={handleCreateOrder}
-            >
-              {creating ? (
+              )}
+              renderOption={(it, isOn) => (
                 <>
-                  <ActivityIndicator color="#fff" style={{ marginRight: 8 }} />
-                  <Text style={styles.btnText}>Đang tạo…</Text>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.btnText}>Tạo đơn hàng</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                    <Image source={it.icon} style={{ width: 26, height: 26, borderRadius: 6, marginRight: 10 }} />
+                    <Text style={[styles.optionText, isOn && { color: UI.accent, fontWeight: '700' }]}>{it.name}</Text>
+                  </View>
+                  {isOn && <Image source={icCheck} style={{ width: 18, height: 18, tintColor: UI.accent }} />}
                 </>
               )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+            />
 
-      <CustomAlert
-        visible={showAlert}
-        message={alertMsg}
-        onClose={() => setShowAlert(false)}
-      />
-    </KeyboardAvoidingView>
+            <View style={{ marginTop: 14 }}>
+              <TouchableOpacity
+                style={[
+                  styles.btn,
+                  { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+                  (!selectedPlan || !selectedPort || !selectedPayment || creating) && { opacity: 0.5 },
+                ]}
+                disabled={!selectedPlan || !selectedPort || !selectedPayment || creating}
+                onPress={handleCreateOrder}
+              >
+                {creating ? (
+                  <>
+                    <ActivityIndicator color="#fff" style={{ marginRight: 8 }} />
+                    <Text style={styles.btnText}>Đang tạo…</Text>
+                  </>
+                ) : (
+                  <Text style={styles.btnText}>Tạo đơn hàng</Text>
+                )}
+              </TouchableOpacity>
+
+              {/* ✅ Xem lại QR đúng điều kiện */}
+              {showViewAgainBtn ? (
+                <TouchableOpacity
+                  style={[styles.btnGhostSmall, { marginTop: 10 }]}
+                  onPress={() => {
+                    setOrderSuccess({
+                      method: 'vietQR',
+                      isViewAgain: true,
+                      orderId: cachedVietQrOrder.orderId,
+                      qrData: cachedVietQrOrder.qrData,
+                      expDate: cachedVietQrOrder.expDate,
+                      createdAt: cachedVietQrOrder.createdAt,
+                    });
+                  }}
+                >
+                  <Text style={styles.btnGhostSmallText}>Xem lại mã QR</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
+        </ScrollView>
+
+        <CustomAlert visible={showAlert} message={alertMsg} onClose={() => setShowAlert(false)} />
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -677,18 +1049,23 @@ const styles = StyleSheet.create({
   },
   deviceText: { marginLeft: 8, color: UI.text, fontWeight: '600' },
 
-  inputWrap: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderWidth: 1, borderColor: UI.border, backgroundColor: UI.surface,
-    borderRadius: 10, paddingHorizontal: 10, height: 44
-  },
-  input: { flex: 1, color: UI.text },
-
   btn: {
     backgroundColor: UI.accent,
     paddingVertical: 12, borderRadius: 12,
   },
   btnText: { color: '#fff', fontSize: 16, fontWeight: '800', textAlign: 'center' },
+
+  btnGhostSmall: {
+    borderWidth: 1,
+    borderColor: UI.accent,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+  },
+  btnGhostSmallText: { color: UI.accent, fontWeight: '800' },
 
   // Success screen
   successWrap: {
@@ -697,6 +1074,8 @@ const styles = StyleSheet.create({
     padding: 18,
     borderWidth: 1,
     borderColor: '#E7EEF9',
+    width: '100%',
+    maxWidth: 720,
   },
   successBadge: {
     alignSelf: 'center',
@@ -727,9 +1106,32 @@ const styles = StyleSheet.create({
 
   btnGhost: {
     borderWidth: 1, borderColor: UI.accent, borderRadius: 12, paddingVertical: 10,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flex: 1
+    alignItems: 'center', justifyContent: 'center'
   },
-  btnGhostText: { color: UI.accent, fontWeight: '500', fontSize: 12 },
+  btnGhostText: { color: UI.accent, fontWeight: '800', fontSize: 14 },
+
+  btnPrimary: {
+    backgroundColor: UI.accent,
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+  },
+
+  actionRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+
+  // VietQR frame overlay styles
+  vietqrFrameWrap: { position: 'relative', alignSelf: 'center' },
+  vietqrFrameImg: { width: '100%', height: '100%' },
+  vietqrQrOverlayAbs: { position: 'absolute', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+
+  qrNoteText: { fontSize: 12.5, color: UI.sub, textAlign: 'center', lineHeight: 18 },
+  qrCountdown: { marginTop: 4, fontSize: 13, fontWeight: '900', color: UI.text },
 
   // CustomAlert styles
   alertBackdrop: {
@@ -760,5 +1162,36 @@ const styles = StyleSheet.create({
     minWidth: 90,
   },
   alertBtnText: { color: '#fff', fontWeight: '700', textAlign: 'center' },
-});
 
+  qrOrderInfo: {
+  marginTop: 12,
+  width: '100%',
+  backgroundColor: '#F8FAFF',
+  borderRadius: 14,
+  borderWidth: 1,
+  borderColor: '#E6EEF9',
+  padding: 12,
+},
+
+qrOrderRow: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'flex-start',
+  paddingVertical: 6,
+},
+
+qrKey: {
+  color: UI.sub,
+  fontSize: 12.5,
+  width: '38%',
+},
+
+qrVal: {
+  color: UI.text,
+  fontSize: 13.5,
+  fontWeight: '600',
+  textAlign: 'right',
+  flexShrink: 1,
+},
+
+});
